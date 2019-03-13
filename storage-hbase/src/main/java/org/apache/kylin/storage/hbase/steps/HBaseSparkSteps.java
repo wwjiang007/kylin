@@ -25,6 +25,7 @@ import org.apache.kylin.engine.mr.CubingJob;
 import org.apache.kylin.engine.mr.common.AbstractHadoopJob;
 import org.apache.kylin.engine.spark.SparkBatchCubingJobBuilder2;
 import org.apache.kylin.engine.spark.SparkExecutable;
+import org.apache.kylin.engine.spark.SparkExecutableFactory;
 import org.apache.kylin.job.constant.ExecutableConstants;
 import org.apache.kylin.job.execution.AbstractExecutable;
 
@@ -39,7 +40,7 @@ public class HBaseSparkSteps extends HBaseJobSteps {
         String inputPath = cuboidRootPath + (cuboidRootPath.endsWith("/") ? "" : "/");
 
         SparkBatchCubingJobBuilder2 jobBuilder2 = new SparkBatchCubingJobBuilder2(seg, null);
-        final SparkExecutable sparkExecutable = new SparkExecutable();
+        final SparkExecutable sparkExecutable = SparkExecutableFactory.instance(seg.getConfig());
         sparkExecutable.setClassName(SparkCubeHFile.class.getName());
         sparkExecutable.setParam(SparkCubeHFile.OPTION_CUBE_NAME.getOpt(), seg.getRealization().getName());
         sparkExecutable.setParam(SparkCubeHFile.OPTION_SEGMENT_ID.getOpt(), seg.getUuid());
@@ -66,6 +67,11 @@ public class HBaseSparkSteps extends HBaseJobSteps {
         StringUtil.appendWithSeparator(jars, ClassUtil.findContainingJar("org.apache.htrace.Trace", null)); // htrace-core.jar
         StringUtil.appendWithSeparator(jars,
                 ClassUtil.findContainingJar("com.yammer.metrics.core.MetricsRegistry", null)); // metrics-core.jar
+        //KYLIN-3607
+        StringUtil.appendWithSeparator(jars,
+                ClassUtil.findContainingJar("org.apache.hadoop.hbase.regionserver.MetricsRegionServerSourceFactory", null));//hbase-hadoop-compat-1.1.1.jar
+        StringUtil.appendWithSeparator(jars,
+                ClassUtil.findContainingJar("org.apache.hadoop.hbase.regionserver.MetricsRegionServerSourceFactoryImpl", null));//hbase-hadoop2-compat-1.1.1.jar
 
         StringUtil.appendWithSeparator(jars, seg.getConfig().getSparkAdditionalJars());
         sparkExecutable.setJars(jars.toString());

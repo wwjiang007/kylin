@@ -142,12 +142,13 @@ public class ITStorageTest extends HBaseMetadataTestCase {
             SQLDigest sqlDigest = new SQLDigest("default.test_kylin_fact", /*allCol*/ Collections.<TblColRef> emptySet(), /*join*/ null, //
                     groups, /*subqueryJoinParticipants*/ Sets.<TblColRef> newHashSet(), //
                     /*dynamicGroupByColumns*/ Collections.<TblColRef, TupleExpression> emptyMap(), //
+                    /*groupByExpression*/ false, //
                     /*metricCol*/ Collections.<TblColRef> emptySet(), aggregations, /*aggrSqlCalls*/ Collections.<SQLCall> emptyList(), //
                     /*dynamicAggregations*/ Collections.<DynamicFunctionDesc> emptyList(), //
                     /*runtimeDimensionColumns*/ Collections.<TblColRef> emptySet(), //
                     /*runtimeMetricColumns*/ Collections.<TblColRef> emptySet(), //
                     /*filter col*/ Collections.<TblColRef> emptySet(), filter, null, //
-                    /*sortCol*/ new ArrayList<TblColRef>(), new ArrayList<SQLDigest.OrderEnum>(), false, new HashSet<MeasureDesc>());
+                    /*sortCol*/ new ArrayList<TblColRef>(), new ArrayList<SQLDigest.OrderEnum>(), false, false, new HashSet<MeasureDesc>());
             iterator = storageEngine.search(context, sqlDigest, mockup.newTupleInfo(groups, aggregations));
             while (iterator.hasNext()) {
                 ITuple tuple = iterator.next();

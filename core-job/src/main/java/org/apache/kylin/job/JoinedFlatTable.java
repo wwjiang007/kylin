@@ -41,7 +41,7 @@ import org.apache.kylin.metadata.model.SegmentRange;
 import org.apache.kylin.metadata.model.TableRef;
 import org.apache.kylin.metadata.model.TblColRef;
 
-import static org.apache.kylin.job.util.FlatTableSqlQuoteUtils.quote;
+import static org.apache.kylin.job.util.FlatTableSqlQuoteUtils.quoteIdentifier;
 import static org.apache.kylin.job.util.FlatTableSqlQuoteUtils.quoteIdentifierInSqlExpr;
 
 import com.google.common.collect.Lists;
@@ -127,7 +127,7 @@ public class JoinedFlatTable {
             }
         }
 
-        return "INSERT OVERWRITE TABLE " + quote(flatDesc.getTableName()) + " " + generateSelectDataStatement(flatDesc)
+        return "INSERT OVERWRITE TABLE " + quoteIdentifier(flatDesc.getTableName()) + " " + generateSelectDataStatement(flatDesc)
                 + ";\n";
     }
 
@@ -150,13 +150,13 @@ public class JoinedFlatTable {
             }
             String colTotalName = String.format(Locale.ROOT, "%s.%s", col.getTableRef().getTableName(), col.getName());
             String quotedColTotalName = String.format(Locale.ROOT, "%s.%s",
-                    quote(col.getTableRef().getTableName()),
-                    quote(col.getName()));
+                    quoteIdentifier(col.getTableRef().getTableName()),
+                    quoteIdentifier(col.getName()));
             if (skipAsList.contains(colTotalName)) {
                 sql.append(getQuotedColExpressionInSourceDB(flatDesc, col)).append(sep);
             } else {
                 sql.append(getQuotedColExpressionInSourceDB(flatDesc, col)).append(" as ")
-                        .append(quote(colName(col))).append(sep);
+                        .append(quoteIdentifier(colName(col))).append(sep);
             }
         }
         appendJoinStatement(flatDesc, sql, singleLine);
@@ -171,7 +171,7 @@ public class JoinedFlatTable {
         DataModelDesc model = flatDesc.getDataModel();
         TableRef rootTable = model.getRootFactTable();
         sql.append(" FROM ").append(flatDesc.getDataModel().getRootFactTable().getTableIdentityQuoted("`"))
-                .append(" as ").append(quote(rootTable.getAlias())).append(sep);
+                .append(" as ").append(quoteIdentifier(rootTable.getAlias())).append(sep);
 
         for (JoinTableDesc lookupDesc : model.getJoinTables()) {
             JoinDesc join = lookupDesc.getJoin();
@@ -186,7 +186,7 @@ public class JoinedFlatTable {
                     String joinType = join.getType().toUpperCase(Locale.ROOT);
 
                     sql.append(joinType).append(" JOIN ").append(dimTable.getTableIdentityQuoted("`"))
-                            .append(" as ").append(quote(dimTable.getAlias())).append(sep);
+                            .append(" as ").append(quoteIdentifier(dimTable.getAlias())).append(sep);
                     sql.append("ON ");
                     for (int i = 0; i < pk.length; i++) {
                         if (i > 0) {
@@ -213,7 +213,7 @@ public class JoinedFlatTable {
     }
 
     private static void appendClusterStatement(StringBuilder sql, TblColRef clusterCol) {
-        sql.append(" CLUSTER BY ").append(colName(clusterCol)).append(";\n");
+        sql.append(" CLUSTER BY CAST(").append(colName(clusterCol)).append(" AS STRING);\n");
     }
 
     private static void appendWhereStatement(IJoinedFlatTableDesc flatDesc, StringBuilder sql) {
@@ -267,6 +267,10 @@ public class JoinedFlatTable {
             hiveDataType = "int";
         } else if (originDataType.startsWith("bigint")) {
             hiveDataType = "bigint";
+        } else if (originDataType.startsWith("double")) {
+            hiveDataType = "double";
+        } else if (originDataType.startsWith("float")) {
+            hiveDataType = "float";
         } else {
             hiveDataType = originDataType;
         }
@@ -277,7 +281,7 @@ public class JoinedFlatTable {
     public static String generateRedistributeFlatTableStatement(IJoinedFlatTableDesc flatDesc, CubeDesc cubeDesc) {
         final String tableName = flatDesc.getTableName();
         StringBuilder sql = new StringBuilder();
-        sql.append("INSERT OVERWRITE TABLE " + quote(tableName) + " SELECT * FROM " + quote(tableName));
+        sql.append("INSERT OVERWRITE TABLE " + quoteIdentifier(tableName) + " SELECT * FROM " + quoteIdentifier(tableName));
 
         if (flatDesc.getClusterBy() != null) {
             appendClusterStatement(sql, flatDesc.getClusterBy());
@@ -305,8 +309,8 @@ public class JoinedFlatTable {
 
     public static String getQuotedColExpressionInSourceDB(IJoinedFlatTableDesc flatDesc, TblColRef col) {
         if (!col.getColumnDesc().isComputedColumn()) {
-            return quote(col.getTableAlias()) + "."
-                    + quote(col.getName());
+            return quoteIdentifier(col.getTableAlias()) + "."
+                    + quoteIdentifier(col.getName());
         } else {
             String computeExpr = col.getColumnDesc().getComputedColumnExpr();
             return quoteIdentifierInSqlExpr(flatDesc, computeExpr, "`");

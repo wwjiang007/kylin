@@ -69,8 +69,10 @@ import org.apache.kylin.metadata.model.TableDesc;
 import org.apache.kylin.metadata.model.TblColRef;
 import org.apache.kylin.metadata.project.ProjectInstance;
 import org.apache.kylin.metadata.project.ProjectManager;
+import org.apache.kylin.metadata.project.RealizationEntry;
 import org.apache.kylin.metadata.realization.IRealization;
 import org.apache.kylin.metadata.realization.IRealizationProvider;
+import org.apache.kylin.metadata.realization.RealizationRegistry;
 import org.apache.kylin.metadata.realization.RealizationStatusEnum;
 import org.apache.kylin.metadata.realization.RealizationType;
 import org.apache.kylin.source.IReadableTable;
@@ -154,11 +156,13 @@ public class CubeManager implements IRealizationProvider {
 
         @Override
         public void onProjectSchemaChange(Broadcaster broadcaster, String project) throws IOException {
-            for (IRealization real : ProjectManager.getInstance(config).listAllRealizations(project)) {
+            ProjectManager projectManager = ProjectManager.getInstance(config);
+            for (IRealization real : projectManager.listAllRealizations(project)) {
                 if (real instanceof CubeInstance) {
                     reloadCubeQuietly(real.getName());
                 }
             }
+            projectManager.reloadProjectL2Cache(project);
         }
 
         @Override
@@ -251,6 +255,23 @@ public class CubeManager implements IRealizationProvider {
                     projectName, owner);
 
             return cube;
+        }
+    }
+
+    /**
+     * when clear all segments, it's supposed to reinitialize the CubeInstance
+     */
+    public CubeInstance clearSegments(CubeInstance cube) throws IOException {
+        try (AutoLock lock = cubeMapLock.lockForWrite()) {
+            cube = cube.latestCopyForWrite(); // get a latest copy
+            CubeUpdate update = new CubeUpdate(cube);
+            update.setToRemoveSegs(cube.getSegments().toArray(new CubeSegment[cube.getSegments().size()]));
+            update.setCuboids(Maps.<Long, Long> newHashMap());
+            update.setCuboidsRecommend(Sets.<Long> newHashSet());
+            update.setUpdateTableSnapshotPath(Maps.<String, String> newHashMap());
+            update.setCreateTimeUTC(System.currentTimeMillis());
+            update.setCuboidLastOptimized(0L);
+            return updateCube(update);
         }
     }
 
@@ -391,6 +412,14 @@ public class CubeManager implements IRealizationProvider {
             for(Map.Entry<String, String> lookupSnapshotPathEntry : update.getUpdateTableSnapshotPath().entrySet()) {
                 cube.putSnapshotResPath(lookupSnapshotPathEntry.getKey(), lookupSnapshotPathEntry.getValue());
             }
+        }
+
+        if (update.getCreateTimeUTC() >= 0) {
+            cube.setCreateTimeUTC(update.getCreateTimeUTC());
+        }
+
+        if (update.getCuboidLastOptimized() >= 0) {
+            cube.setCuboidLastOptimized(update.getCuboidLastOptimized());
         }
     }
 
@@ -1166,4 +1195,28 @@ public class CubeManager implements IRealizationProvider {
         }
     }
 
+    public CubeInstance findLatestSnapshot(List<RealizationEntry> realizationEntries, String lookupTableName) {
+        CubeInstance cube = null;
+        if (realizationEntries.size() > 0) {
+            long maxBuildTime = Long.MIN_VALUE;
+            RealizationRegistry registry = RealizationRegistry.getInstance(config);
+            for (RealizationEntry entry : realizationEntries) {
+                IRealization realization = registry.getRealization(entry.getType(), entry.getRealization());
+                if (realization != null && realization.isReady() && realization instanceof CubeInstance) {
+                    if (realization.getModel().isLookupTable(lookupTableName)) {
+                        CubeInstance current = (CubeInstance) realization;
+                        CubeSegment segment = current.getLatestReadySegment();
+                        if (segment != null) {
+                            long latestBuildTime = segment.getLastBuildTime();
+                            if (latestBuildTime > maxBuildTime) {
+                                maxBuildTime = latestBuildTime;
+                                cube = current;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return cube;
+    }
 }

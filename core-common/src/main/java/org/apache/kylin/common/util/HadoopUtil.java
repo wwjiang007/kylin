@@ -37,6 +37,7 @@ import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.kylin.common.KylinConfig;
 import org.apache.kylin.common.StorageURL;
+import org.apache.kylin.common.threadlocal.InternalThreadLocal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,7 +46,7 @@ import com.google.common.collect.Maps;
 public class HadoopUtil {
     @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(HadoopUtil.class);
-    private static final transient ThreadLocal<Configuration> hadoopConfig = new ThreadLocal<>();
+    private static final transient InternalThreadLocal<Configuration> hadoopConfig = new InternalThreadLocal<>();
     private HadoopUtil() {
         throw new IllegalStateException("Class HadoopUtil is an utility class !");
     }
@@ -99,7 +100,7 @@ public class HadoopUtil {
         return getFileSystem(new Path(makeURI(path)), conf);
     }
     
-    public static FileSystem getFileSystem(Path path) throws IOException {
+    public static FileSystem getFileSystem(Path path) {
         Configuration conf = getCurrentConfiguration();
         return getFileSystem(path, conf);
     }
@@ -236,4 +237,28 @@ public class HadoopUtil {
         return readFromSequenceFile(getCurrentConfiguration(), inputPath);
     }
 
+    public static boolean isSequenceFile(Configuration conf, Path filePath) {
+        try (SequenceFile.Reader reader = new SequenceFile.Reader(getWorkingFileSystem(conf), filePath, conf)) {
+            return true;
+        } catch (Exception e) {
+            logger.warn("Read sequence file {} failed.", filePath.getName(), e);
+            return false;
+        }
+    }
+
+    public static boolean isSequenceDir(Configuration conf, Path fileDir) throws IOException {
+        FileSystem fs = getWorkingFileSystem(conf);
+        FileStatus[] fileStatuses = fs.listStatus(fileDir, new PathFilter() {
+            @Override
+            public boolean accept(Path path) {
+                return !"_SUCCESS".equals(path.getName());
+            }
+        });
+
+        if (fileStatuses != null && fileStatuses.length > 0) {
+            return isSequenceFile(conf, fileStatuses[0].getPath());
+        } else {
+            return true;
+        }
+    }
 }

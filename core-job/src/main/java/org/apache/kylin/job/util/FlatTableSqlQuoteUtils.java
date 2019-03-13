@@ -19,6 +19,7 @@
 package org.apache.kylin.job.util;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -42,8 +43,31 @@ public class FlatTableSqlQuoteUtils {
      * @param identifier
      * @return
      */
-    public static String quote(String identifier){
+    public static String quoteIdentifier(String identifier){
         return QUOTE + identifier + QUOTE;
+    }
+
+    /**
+     * Quote table identity, eg. `default`.`kylin_sales`
+     * @param database
+     * @param table
+     * @param quote
+     * @return
+     */
+    public static String quoteTableIdentity(String database, String table, String quote) {
+        String dbName = quote + database + quote;
+        String tableName = quote + table + quote;
+        return String.format(Locale.ROOT, "%s.%s", dbName, tableName).toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * use default quote ` to quote table identity
+     * @param database
+     * @param table
+     * @return
+     */
+    public static String quoteTableIdentity(String database, String table) {
+        return quoteTableIdentity(database, table, QUOTE);
     }
 
     /**

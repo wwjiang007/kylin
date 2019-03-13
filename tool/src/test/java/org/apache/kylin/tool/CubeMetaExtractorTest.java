@@ -77,11 +77,12 @@ public class CubeMetaExtractorTest extends LocalFileMetadataTestCase {
         Preconditions.checkState(files.length == 1);
         String dumpDir = files[0].getAbsolutePath();
         KylinConfig instanceFromUri = KylinConfig.createInstanceFromUri(dumpDir);
-        NavigableSet<String> tables = ResourceTool.list(instanceFromUri, "table");
-        NavigableSet<String> tableExds = ResourceTool.list(instanceFromUri, "table_exd");
+        NavigableSet<String> tables = new ResourceTool().list(instanceFromUri, "table");
+        NavigableSet<String> tableExds = new ResourceTool().list(instanceFromUri, "table_exd");
         Set<String> expectTbl = Sets.newHashSet(
                 "/table/DEFAULT.FIFTY_DIM.json", //
                 "/table/DEFAULT.STREAMING_TABLE.json", //
+                "/table/DEFAULT.STREAMING_CATEGORY.json", //
                 "/table/DEFAULT.TEST_ACCOUNT.json", //
                 "/table/DEFAULT.TEST_CATEGORY_GROUPINGS.json", //
                 "/table/DEFAULT.TEST_COUNTRY.json", //

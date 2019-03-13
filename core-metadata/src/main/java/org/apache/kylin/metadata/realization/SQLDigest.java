@@ -60,6 +60,7 @@ public class SQLDigest {
     public Set<TblColRef> subqueryJoinParticipants;
 
     public Map<TblColRef, TupleExpression> dynGroupbyColumns;
+    public boolean groupByExpression;
 
     // aggregation
     public Set<TblColRef> metricColumns;
@@ -80,17 +81,18 @@ public class SQLDigest {
     public List<OrderEnum> sortOrders;
     public boolean isRawQuery;
     public boolean limitPrecedesAggr;
+    public boolean hasLimit;
 
     public Set<MeasureDesc> involvedMeasure;
 
     public SQLDigest(String factTable, Set<TblColRef> allColumns, List<JoinDesc> joinDescs, // model
             List<TblColRef> groupbyColumns, Set<TblColRef> subqueryJoinParticipants,
-            Map<TblColRef, TupleExpression> dynGroupByColumns, // group by
+            Map<TblColRef, TupleExpression> dynGroupByColumns, boolean groupByExpression, // group by
             Set<TblColRef> metricColumns, List<FunctionDesc> aggregations, List<SQLCall> aggrSqlCalls, // aggregation
             List<DynamicFunctionDesc> dynAggregations, //
             Set<TblColRef> rtDimensionColumns, Set<TblColRef> rtMetricColumns, // dynamic col related columns
             Set<TblColRef> filterColumns, TupleFilter filter, TupleFilter havingFilter, // filter
-            List<TblColRef> sortColumns, List<OrderEnum> sortOrders, boolean limitPrecedesAggr, // sort & limit
+            List<TblColRef> sortColumns, List<OrderEnum> sortOrders, boolean limitPrecedesAggr, boolean hasLimit, // sort & limit
             Set<MeasureDesc> involvedMeasure
     ) {
         this.factTable = factTable;
@@ -101,6 +103,7 @@ public class SQLDigest {
         this.subqueryJoinParticipants = subqueryJoinParticipants;
 
         this.dynGroupbyColumns = dynGroupByColumns;
+        this.groupByExpression = groupByExpression;
 
         this.metricColumns = metricColumns;
         this.aggregations = aggregations;
@@ -119,6 +122,7 @@ public class SQLDigest {
         this.sortOrders = sortOrders;
         this.isRawQuery = isRawQuery();
         this.limitPrecedesAggr = limitPrecedesAggr;
+        this.hasLimit = hasLimit;
 
         this.involvedMeasure = involvedMeasure;
 

@@ -31,7 +31,7 @@
   <groupId>org.apache.kylin</groupId>
   <artifactId>kylin</artifactId>
   <packaging>pom</packaging>
-  <version>2.6.0-SNAPSHOT</version>
+  <version>3.0.0-SNAPSHOT</version>
 
   <name>Apache Kylin</name>
   <url>http://kylin.apache.org</url>
@@ -71,7 +71,7 @@
 
     <!-- <reflections.version>0.9.10</reflections.version> -->
 
-    <!-- Calcite Version -->
+    <!-- Calcite Version, the kylin fork is: https://github.com/Kyligence/calcite -->
     <calcite.version>1.16.0-kylin-r2</calcite.version>
     <avatica.version>1.10.0</avatica.version>
 
@@ -478,19 +478,16 @@
         <groupId>org.apache.curator</groupId>
         <artifactId>curator-framework</artifactId>
         <version>${curator.version}</version>
-        <scope>provided</scope>
       </dependency>
       <dependency>
         <groupId>org.apache.curator</groupId>
         <artifactId>curator-recipes</artifactId>
         <version>${curator.version}</version>
-        <scope>provided</scope>
       </dependency>
       <dependency>
         <groupId>org.apache.curator</groupId>
         <artifactId>curator-client</artifactId>
         <version>${curator.version}</version>
-        <scope>provided</scope>
       </dependency>
       <dependency>
         <groupId>com.google.code.findbugs</groupId>
@@ -865,7 +862,6 @@
         <version>${opensaml.version}</version>
       </dependency>
 
-
       <!-- Spring Core -->
       <dependency>
         <groupId>org.springframework</groupId>
@@ -971,6 +967,18 @@
         <groupId>org.scala-lang</groupId>
         <artifactId>scala-reflect</artifactId>
         <version>${scala.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.curator</groupId>
+        <artifactId>curator-x-discovery</artifactId>
+        <version>${curator.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.curator</groupId>
+        <artifactId>curator-test</artifactId>
+        <version>${curator.version}</version>
+        <scope>test</scope>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -1256,6 +1264,13 @@
         </executions>
       </plugin>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <configuration>
+          <excludePackageNames>org.apache.kylin.*</excludePackageNames>
+        </configuration>
+      </plugin>
+      <plugin>
         <groupId>net.alchim31.maven</groupId>
         <artifactId>scala-maven-plugin</artifactId>
         <!-- uncomment this on release -->
@@ -1374,13 +1389,6 @@
                 </configuration>
               </execution>
             </executions>
-          </plugin>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-javadoc-plugin</artifactId>
-            <configuration>
-              <excludePackageNames>org.apache.kylin.*</excludePackageNames>
-            </configuration>
           </plugin>
           <plugin>
             <groupId>de.thetaphi</groupId>
@@ -1614,9 +1622,11 @@
                   <tarLongFileMode>posix</tarLongFileMode>
                   <runOnlyAtExecutionRoot>true</runOnlyAtExecutionRoot>
                   <appendAssemblyId>true</appendAssemblyId>
-                  <descriptor>
+                  <descriptors>
+                    <descriptor>
                     assembly/src/main/config/assemblies/source-assembly.xml
-                  </descriptor>
+                    </descriptor>
+                  </descriptors>
                   <finalName>apache-kylin-${project.version}</finalName>
                 </configuration>
               </execution>

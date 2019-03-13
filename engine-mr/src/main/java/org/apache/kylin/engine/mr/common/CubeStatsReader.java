@@ -102,7 +102,7 @@ public class CubeStatsReader {
         if (resource == null)
             throw new IllegalStateException("Missing resource at " + statsKey);
 
-        File tmpSeqFile = writeTmpSeqFile(resource.inputStream);
+        File tmpSeqFile = writeTmpSeqFile(resource.content());
         Path path = new Path(HadoopUtil.fixWindowsPath("file://" + tmpSeqFile.getAbsolutePath()));
 
         CubeStatsResult cubeStatsResult = new CubeStatsResult(path, kylinConfig.getCubeStatsHLLPrecision());
@@ -299,7 +299,7 @@ public class CubeStatsReader {
         Map<Long, Double> cuboidSizeMap = getCuboidSizeMap();
         double ret = 0;
         for (Long cuboidId : layeredCuboids.get(level)) {
-            ret += cuboidSizeMap.get(cuboidId);
+            ret += cuboidSizeMap.get(cuboidId) == null ? 0.0 : cuboidSizeMap.get(cuboidId);
         }
 
         logger.info("Estimating size for layer {}, all cuboids are {}, total size is {}", level,
