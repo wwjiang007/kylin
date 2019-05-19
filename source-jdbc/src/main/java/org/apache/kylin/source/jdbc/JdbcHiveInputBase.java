@@ -170,6 +170,8 @@ public class JdbcHiveInputBase extends HiveInputBase {
             String jdbcUser = config.getJdbcSourceUser();
             String jdbcPass = config.getJdbcSourcePass();
             String sqoopHome = config.getSqoopHome();
+            String sqoopNullString = config.getSqoopNullString();
+            String sqoopNullNonString = config.getSqoopNullNonString();
             String filedDelimiter = config.getJdbcSourceFieldDelimiter();
             int mapperNum = config.getSqoopMapperNum();
 
@@ -183,8 +185,7 @@ public class JdbcHiveInputBase extends HiveInputBase {
                             .getPartitionTimeColumnRef().getTableAlias().equals(splitTableAlias))) {
                         String quotedPartCond = FlatTableSqlQuoteUtils.quoteIdentifierInSqlExpr(flatDesc,
                                 partitionDesc.getPartitionConditionBuilder().buildDateRangeCondition(partitionDesc,
-                                        flatDesc.getSegment(), segRange),
-                                "`");
+                                        flatDesc.getSegment(), segRange));
                         bquery += " WHERE " + quotedPartCond;
                     }
                 }
@@ -196,11 +197,11 @@ public class JdbcHiveInputBase extends HiveInputBase {
 
             String cmd = String.format(Locale.ROOT,
                     "%s/bin/sqoop import" + generateSqoopConfigArgString()
-                            + "--connect \"%s\" --driver %s --username %s --password %s --query \"%s AND \\$CONDITIONS\" "
-                            + "--target-dir %s/%s --split-by %s --boundary-query \"%s\" --null-string '' "
-                            + "--fields-terminated-by '%s' --num-mappers %d",
+                            + "--connect \"%s\" --driver %s --username %s --password \"%s\" --query \"%s AND \\$CONDITIONS\" "
+                            + "--target-dir %s/%s --split-by %s --boundary-query \"%s\" --null-string '%s' "
+                            + "--null-non-string '%s' --fields-terminated-by '%s' --num-mappers %d",
                     sqoopHome, connectionUrl, driverClass, jdbcUser, jdbcPass, selectSql, jobWorkingDir, hiveTable,
-                    splitColumn, bquery, filedDelimiter, mapperNum);
+                    splitColumn, bquery, sqoopNullString, sqoopNullNonString, filedDelimiter, mapperNum);
             logger.debug(String.format(Locale.ROOT, "sqoop cmd:%s", cmd));
             CmdStep step = new CmdStep();
             step.setCmd(cmd);

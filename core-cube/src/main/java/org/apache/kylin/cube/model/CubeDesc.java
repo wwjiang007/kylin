@@ -33,6 +33,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -1339,6 +1340,25 @@ public class CubeDesc extends RootPersistentEntity implements IEngineAware {
             }
         }
 
+        //mr - hive global dict
+        if (overrideKylinProps.containsKey("kylin.dictionary.mr-hive.columns")) {
+            String mrHiveDictColumns = overrideKylinProps.get("kylin.dictionary.mr-hive.columns");
+            if (StringUtils.isNotEmpty(mrHiveDictColumns)) {
+                String[] mrHiveDictColumnArr = mrHiveDictColumns.split(",");
+                for (String dictColumn : mrHiveDictColumnArr) {
+                    Iterator<TblColRef> it = result.iterator();
+                    while (it.hasNext()) {
+                        TblColRef colRef = it.next();
+                        String aliasCol = colRef.getTableAlias() + "_" + colRef.getName();
+                        if (aliasCol.equalsIgnoreCase(dictColumn)) {
+                            logger.debug("Remove column {} because it has been built by MR", aliasCol);
+                            it.remove();
+                        }
+                    }
+                }
+            }
+        }
+
         return result;
     }
 
@@ -1429,6 +1449,10 @@ public class CubeDesc extends RootPersistentEntity implements IEngineAware {
             }
         }
         return result;
+    }
+
+    public boolean isStreamingCube() {
+        return getModel().getRootFactTable().getTableDesc().isStreamingTable();
     }
 
     /** Get a column which can be used to cluster the source table.

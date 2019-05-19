@@ -214,15 +214,18 @@ public abstract class AbstractHadoopJob extends Configured implements Tool {
         String kylinKafkaDependency = System.getProperty("kylin.kafka.dependency");
 
         Configuration jobConf = job.getConfiguration();
-        String classpath = jobConf.get(MAP_REDUCE_CLASSPATH);
-        if (classpath == null || classpath.length() == 0) {
-            logger.info("Didn't find " + MAP_REDUCE_CLASSPATH
-                    + " in job configuration, will run 'mapred classpath' to get the default value.");
-            classpath = getDefaultMapRedClasspath();
-            logger.info("The default mapred classpath is: " + classpath);
-        }
 
-        jobConf.set(MAP_REDUCE_CLASSPATH, classpath);
+        if (kylinConf.isUseLocalClasspathEnabled()) {
+            String classpath = jobConf.get(MAP_REDUCE_CLASSPATH);
+            if (classpath == null || classpath.length() == 0) {
+                logger.info("Didn't find " + MAP_REDUCE_CLASSPATH
+                    + " in job configuration, will run 'mapred classpath' to get the default value.");
+                classpath = getDefaultMapRedClasspath();
+                logger.info("The default mapred classpath is: " + classpath);
+            }
+
+            jobConf.set(MAP_REDUCE_CLASSPATH, classpath);
+        }
         logger.trace("Hadoop job classpath is: " + job.getConfiguration().get(MAP_REDUCE_CLASSPATH));
 
         /*
@@ -541,8 +544,7 @@ public abstract class AbstractHadoopJob extends Configured implements Tool {
     }
 
     protected void attachCubeMetadataWithDict(CubeInstance cube, Configuration conf) throws IOException {
-        Set<String> dumpList = new LinkedHashSet<>();
-        dumpList.addAll(collectCubeMetadata(cube));
+        Set<String> dumpList = new LinkedHashSet<>(collectCubeMetadata(cube));
         for (CubeSegment segment : cube.getSegments()) {
             dumpList.addAll(segment.getDictionaryPaths());
         }
@@ -550,9 +552,8 @@ public abstract class AbstractHadoopJob extends Configured implements Tool {
     }
 
     protected void attachSegmentsMetadataWithDict(List<CubeSegment> segments, Configuration conf) throws IOException {
-        Set<String> dumpList = new LinkedHashSet<>();
         CubeInstance cube = segments.get(0).getCubeInstance();
-        dumpList.addAll(collectCubeMetadata(cube));
+        Set<String> dumpList = new LinkedHashSet<>(collectCubeMetadata(cube));
         for (CubeSegment segment : segments) {
             dumpList.addAll(segment.getDictionaryPaths());
         }
@@ -560,8 +561,7 @@ public abstract class AbstractHadoopJob extends Configured implements Tool {
     }
 
     protected void attachSegmentsMetadataWithDict(List<CubeSegment> segments, String metaUrl) throws IOException {
-        Set<String> dumpList = new LinkedHashSet<>();
-        dumpList.addAll(JobRelatedMetaUtil.collectCubeMetadata(segments.get(0).getCubeInstance()));
+        Set<String> dumpList = new LinkedHashSet<>(JobRelatedMetaUtil.collectCubeMetadata(segments.get(0).getCubeInstance()));
         for (CubeSegment segment : segments) {
             dumpList.addAll(segment.getDictionaryPaths());
             dumpList.add(segment.getStatisticsResourcePath());
@@ -579,8 +579,7 @@ public abstract class AbstractHadoopJob extends Configured implements Tool {
 
     protected void attachSegmentMetadata(CubeSegment segment, Configuration conf, boolean ifDictIncluded,
             boolean ifStatsIncluded) throws IOException {
-        Set<String> dumpList = new LinkedHashSet<>();
-        dumpList.addAll(collectCubeMetadata(segment.getCubeInstance()));
+        Set<String> dumpList = new LinkedHashSet<>(collectCubeMetadata(segment.getCubeInstance()));
         if (ifDictIncluded) {
             dumpList.addAll(segment.getDictionaryPaths());
         }

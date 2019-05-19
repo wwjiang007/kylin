@@ -377,6 +377,9 @@ public abstract class KylinConfigBase implements Serializable {
         return getOptional("kylin.env.zookeeper.zk-acl", "world:anyone:rwcda");
     }
 
+    public String[] getRestServersWithMode() {
+        return getOptionalStringArray("kylin.server.cluster-servers-with-mode", new String[0]);
+    }
     // ============================================================================
     // METADATA
     // ============================================================================
@@ -489,7 +492,7 @@ public abstract class KylinConfigBase implements Serializable {
         return Boolean.parseBoolean(getOptional("kylin.dictionary.use-forest-trie", TRUE));
     }
 
-    public int getTrieDictionaryForestMaxTrieSizeMB() {
+    public long getTrieDictionaryForestMaxTrieSizeMB() {
         return Integer.parseInt(getOptional("kylin.dictionary.forest-trie-max-mb", "500"));
     }
 
@@ -542,7 +545,27 @@ public abstract class KylinConfigBase implements Serializable {
     }
 
     public boolean isShrunkenDictFromGlobalEnabled() {
-        return Boolean.parseBoolean(this.getOptional("kylin.dictionary.shrunken-from-global-enabled", FALSE));
+        return Boolean.parseBoolean(this.getOptional("kylin.dictionary.shrunken-from-global-enabled", TRUE));
+    }
+
+    // ============================================================================
+    // mr-hive dict
+    // ============================================================================
+
+    public String[] getMrHiveDictColumns() {
+        String columnStr = getOptional("kylin.dictionary.mr-hive.columns", "");
+        if (!StringUtils.isEmpty(columnStr)) {
+            return columnStr.split(",");
+        }
+        return null;
+    }
+
+    public String getMrHiveDictDB() {
+        return getOptional("kylin.dictionary.mr-hive.database", getHiveDatabaseForIntermediateTable());
+    }
+
+    public String getMrHiveDictTableSuffix() {
+        return getOptional("kylin.dictionary.mr-hive.table.suffix", "_global_dict");
     }
 
     // ============================================================================
@@ -580,6 +603,10 @@ public abstract class KylinConfigBase implements Serializable {
 
     public double getCubeAlgorithmAutoThreshold() {
         return Double.parseDouble(getOptional("kylin.cube.algorithm.layer-or-inmem-threshold", "7"));
+    }
+
+    public boolean isAutoInmemToOptimize() {
+        return Boolean.parseBoolean(getOptional("kylin.cube.algorithm.inmem-auto-optimize", TRUE));
     }
 
     public int getCubeAlgorithmAutoMapperLimit() {
@@ -840,8 +867,18 @@ public abstract class KylinConfigBase implements Serializable {
         r.put(1, "org.apache.kylin.source.kafka.KafkaSource");
         r.put(8, "org.apache.kylin.source.jdbc.JdbcSource");
         r.put(16, "org.apache.kylin.source.jdbc.extensible.JdbcSource");
+        r.put(20, "org.apache.kylin.stream.source.kafka.KafkaBatchSourceAdaptor");
+        r.put(21, "org.apache.kylin.stream.source.kafka.KafkaBatchSourceAdaptor");
         r.putAll(convertKeyToInteger(getPropertiesByPrefix("kylin.source.provider.")));
         return r;
+    }
+
+    public boolean enableHiveDdlQuote(){
+        return Boolean.parseBoolean(getOptional("kylin.source.hive.quote-enabled", TRUE));
+    }
+
+    public String getQuoteCharacter(){
+        return getOptional("kylin.source.quote.character", "`");
     }
 
     /**
@@ -1013,6 +1050,14 @@ public abstract class KylinConfigBase implements Serializable {
         return Integer.parseInt(getOptional("kylin.source.jdbc.sqoop-mapper-num", "4"));
     }
 
+    public String getSqoopNullString() {
+        return getOptional("kylin.source.jdbc.sqoop-null-string", "\\\\N");
+    }
+
+    public String getSqoopNullNonString() {
+        return getOptional("kylin.source.jdbc.sqoop-null-non-string", "\\\\N");
+    }
+
     public Map<String, String> getSqoopConfigOverride() {
         return getPropertiesByPrefix("kylin.source.jdbc.sqoop-config-override.");
     }
@@ -1031,6 +1076,7 @@ public abstract class KylinConfigBase implements Serializable {
         r.put(0, "org.apache.kylin.storage.hbase.HBaseStorage");
         r.put(1, "org.apache.kylin.storage.hybrid.HybridStorage");
         r.put(2, "org.apache.kylin.storage.hbase.HBaseStorage");
+        r.put(3, "org.apache.kylin.storage.stream.StreamStorage");
         r.putAll(convertKeyToInteger(getPropertiesByPrefix("kylin.storage.provider.")));
         return r;
     }
@@ -1209,6 +1255,10 @@ public abstract class KylinConfigBase implements Serializable {
         return Integer.parseInt(getOptional("kylin.storage.hbase.replication-scope", "0"));
     }
 
+    public boolean cleanStorageAfterDelOperation() {
+        return Boolean.parseBoolean(getOptional("kylin.storage.clean-after-delete-operation", FALSE));
+    }
+
     // ============================================================================
     // ENGINE.MR
     // ============================================================================
@@ -1313,7 +1363,7 @@ public abstract class KylinConfigBase implements Serializable {
 
     //UHC: ultra high cardinality columns, contain the ShardByColumns and the GlobalDictionaryColumns
     public int getUHCReducerCount() {
-        return Integer.parseInt(getOptional("kylin.engine.mr.uhc-reducer-count", "1"));
+        return Integer.parseInt(getOptional("kylin.engine.mr.uhc-reducer-count", "3"));
     }
 
     public boolean isBuildUHCDictWithMREnabled() {
@@ -1330,6 +1380,19 @@ public abstract class KylinConfigBase implements Serializable {
 
     public int getYarnStatusCheckIntervalSeconds() {
         return Integer.parseInt(getOptional("kylin.engine.mr.yarn-check-interval-seconds", "10"));
+    }
+
+    public boolean isUseLocalClasspathEnabled() {
+        return Boolean.parseBoolean(getOptional("kylin.engine.mr.use-local-classpath", TRUE));
+    }
+
+
+    /**
+     * different version hive use different UNION style
+     * https://cwiki.apache.org/confluence/display/Hive/LanguageManual+Union
+     */
+    public String getHiveUnionStyle(){
+        return getOptional("kylin.hive.union.style", "UNION");
     }
 
     // ============================================================================
@@ -1362,6 +1425,10 @@ public abstract class KylinConfigBase implements Serializable {
 
     public boolean isSparkSanityCheckEnabled() {
         return Boolean.parseBoolean(getOptional("kylin.engine.spark.sanity-check-enabled", FALSE));
+    }
+
+    public boolean isSparkFactDistinctEnable() {
+        return Boolean.parseBoolean(getOptional("kylin.engine.spark-fact-distinct", "false"));
     }
     
     // ============================================================================
@@ -1766,6 +1833,10 @@ public abstract class KylinConfigBase implements Serializable {
         return Integer.parseInt(this.getOptional("kylin.server.auth-user-cache.max-entries", "100"));
     }
 
+    public String getSecurityProfile() {
+        return getOptional("kylin.security.profile", "testing");
+    }
+
     public String getExternalAclProvider() {
         return getOptional("kylin.server.external-acl-provider", "");
     }
@@ -1819,7 +1890,8 @@ public abstract class KylinConfigBase implements Serializable {
                 + "kylin.web.help,kylin.web.hide-measures,kylin.web.link-streaming-guide,kylin.server.external-acl-provider,"
                 + "kylin.security.profile,"
                 + "kylin.htrace.show-gui-trace-toggle,kylin.web.export-allow-admin,kylin.web.export-allow-other,"
-                + "kylin.cube.cubeplanner.enabled,kylin.web.dashboard-enabled,kylin.tool.auto-migrate-cube.enabled");
+                + "kylin.cube.cubeplanner.enabled,kylin.web.dashboard-enabled,kylin.tool.auto-migrate-cube.enabled,"
+                + "kylin.job.scheduler.default");
     }
 
     // ============================================================================
@@ -1975,5 +2047,149 @@ public abstract class KylinConfigBase implements Serializable {
 
     public boolean isLimitPushDownEnabled() {
         return Boolean.parseBoolean(getOptional("kylin.storage.limit-push-down-enabled", TRUE));
+    }
+
+    // ============================================================================
+    // streaming
+    // ============================================================================
+    public String getStreamingStoreClass() {
+        return getOptional("kylin.stream.store.class",
+                "org.apache.kylin.stream.core.storage.columnar.ColumnarSegmentStore");
+    }
+
+    public String getStreamingBasicCuboidJobDFSBlockSize() {
+        return getOptional("kylin.stream.job.dfs.block.size", String.valueOf(16 * 1024 * 1024));
+    }
+
+    public String getStreamingIndexPath() {
+        return getOptional("kylin.stream.index.path", "stream_index");
+    }
+
+    public int getStreamingCubeConsumerTasksNum() {
+        return Integer.parseInt(getOptional("kylin.stream.cube-num-of-consumer-tasks", "3"));
+    }
+
+    public int getStreamingCubeWindowInSecs() {
+        return Integer.parseInt(getOptional("kylin.stream.cube.window", "3600"));
+    }
+
+    public int getStreamingCubeDurationInSecs() {
+        return Integer.parseInt(getOptional("kylin.stream.cube.duration", "7200"));
+    }
+
+    public int getStreamingCubeMaxDurationInSecs() {
+        return Integer.parseInt(getOptional("kylin.stream.cube.duration.max", "43200"));
+    }
+
+    public int getStreamingCheckPointFileMaxNum() {
+        return Integer.parseInt(getOptional("kylin.stream.checkpoint.file.max.num", "5"));
+    }
+
+    public int getStreamingCheckPointIntervalsInSecs() {
+        return Integer.parseInt(getOptional("kylin.stream.index.checkpoint.intervals", "300"));
+    }
+
+    public int getStreamingIndexMaxRows() {
+        return Integer.parseInt(getOptional("kylin.stream.index.maxrows", "50000"));
+    }
+
+    public int getStreamingMaxImmutableSegments() {
+        return Integer.parseInt(getOptional("kylin.stream.immutable.segments.max.num", "100"));
+    }
+
+    public boolean isStreamingConsumeFromLatestOffsets() {
+        return Boolean.parseBoolean(getOptional("kylin.stream.consume.offsets.latest", "true"));
+    }
+
+    public String getStreamingNode() {
+        return getOptional("kylin.stream.node", null);
+    }
+
+    public Map<String, String> getStreamingNodeProperties() {
+        return getPropertiesByPrefix("kylin.stream.node");
+    }
+
+    public String getStreamingMetadataStoreType() {
+        return getOptional("kylin.stream.metadata.store.type", "zk");
+    }
+
+    public String getStreamingSegmentRetentionPolicy() {
+        return getOptional("kylin.stream.segment.retention.policy", "fullBuild");
+    }
+
+    public String getStreamingAssigner() {
+        return getOptional("kylin.stream.assigner", "DefaultAssigner");
+    }
+
+    public int getCoordinatorHttpClientTimeout() {
+        return Integer.parseInt(getOptional("kylin.stream.coordinator.client.timeout.millsecond", "5000"));
+    }
+
+    public int getReceiverHttpClientTimeout() {
+        return Integer.parseInt(getOptional("kylin.stream.receiver.client.timeout.millsecond", "5000"));
+    }
+
+    public int getStreamingReceiverHttpMaxThreads() {
+        return Integer.parseInt(getOptional("kylin.stream.receiver.http.max.threads", "200"));
+    }
+
+    public int getStreamingReceiverHttpMinThreads() {
+        return Integer.parseInt(getOptional("kylin.stream.receiver.http.min.threads", "10"));
+    }
+
+    public int getStreamingReceiverQueryCoreThreads() {
+        return Integer.parseInt(getOptional("kylin.stream.receiver.query-core-threads", "50"));
+    }
+
+    public int getStreamingReceiverQueryMaxThreads() {
+        return Integer.parseInt(getOptional("kylin.stream.receiver.query-max-threads", "200"));
+    }
+
+    public int getStreamingReceiverUseThreadsPerQuery() {
+        return Integer.parseInt(getOptional("kylin.stream.receiver.use-threads-per-query", "8"));
+    }
+
+    public int getStreamingRPCHttpConnTimeout() {
+        return Integer.parseInt(getOptional("kylin.stream.rpc.http.connect.timeout", "10000"));
+    }
+
+    public int getStreamingRPCHttpReadTimeout() {
+        return Integer.parseInt(getOptional("kylin.stream.rpc.http.read.timeout", "60000"));
+    }
+
+    public boolean isStreamingBuildAdditionalCuboids() {
+        return Boolean.parseBoolean(getOptional("kylin.stream.build.additional.cuboids", "false"));
+    }
+
+    public Map<String, String> getStreamingSegmentRetentionPolicyProperties(String policyName) {
+        return getPropertiesByPrefix("kylin.stream.segment.retention.policy." + policyName + ".");
+    }
+
+    public int getStreamingMaxFragmentsInSegment() {
+        return Integer.parseInt(getOptional("kylin.stream.segment-max-fragments", "50"));
+    }
+
+    public int getStreamingMinFragmentsInSegment() {
+        return Integer.parseInt(getOptional("kylin.stream.segment-min-fragments", "15"));
+    }
+
+    public int getStreamingMaxFragmentSizeInMb() {
+        return Integer.parseInt(getOptional("kylin.stream.max-fragment-size-mb", "300"));
+    }
+
+    public boolean isStreamingFragmentsAutoMergeEnabled() {
+        return Boolean.parseBoolean(getOptional("kylin.stream.fragments-auto-merge-enable", "true"));
+    }
+
+    public boolean isStreamingConcurrentScanEnabled() {
+        return Boolean.parseBoolean(getOptional("kylin.stream.segment.concurrent.scan", "false"));
+    }
+
+    public boolean isStreamingStandAloneMode() {
+        return Boolean.parseBoolean(getOptional("kylin.stream.stand-alone.mode", "false"));
+    }
+
+    public String getLocalStorageImpl() {
+        return getOptional("kylin.stream.settled.storage", null);
     }
 }

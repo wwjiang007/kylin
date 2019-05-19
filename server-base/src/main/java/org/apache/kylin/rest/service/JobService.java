@@ -39,7 +39,6 @@ import org.apache.kylin.common.util.Pair;
 import org.apache.kylin.cube.CubeInstance;
 import org.apache.kylin.cube.CubeManager;
 import org.apache.kylin.cube.CubeSegment;
-import org.apache.kylin.cube.CubeUpdate;
 import org.apache.kylin.cube.model.CubeBuildTypeEnum;
 import org.apache.kylin.engine.EngineFactory;
 import org.apache.kylin.engine.mr.BatchOptimizeJobCheckpointBuilder;
@@ -204,17 +203,17 @@ public class JobService extends BasicService implements InitializingBean {
 
     public JobInstance submitJob(CubeInstance cube, TSRange tsRange, SegmentRange segRange, //
             Map<Integer, Long> sourcePartitionOffsetStart, Map<Integer, Long> sourcePartitionOffsetEnd,
-            CubeBuildTypeEnum buildType, boolean force, String submitter) throws IOException {
+            CubeBuildTypeEnum buildType, boolean force, String submitter, Integer priorityOffset) throws IOException {
         aclEvaluate.checkProjectOperationPermission(cube);
         JobInstance jobInstance = submitJobInternal(cube, tsRange, segRange, sourcePartitionOffsetStart,
-                sourcePartitionOffsetEnd, buildType, force, submitter);
+                sourcePartitionOffsetEnd, buildType, force, submitter, priorityOffset);
 
         return jobInstance;
     }
 
     public JobInstance submitJobInternal(CubeInstance cube, TSRange tsRange, SegmentRange segRange, //
             Map<Integer, Long> sourcePartitionOffsetStart, Map<Integer, Long> sourcePartitionOffsetEnd, //
-            CubeBuildTypeEnum buildType, boolean force, String submitter) throws IOException {
+            CubeBuildTypeEnum buildType, boolean force, String submitter, Integer priorityOffset) throws IOException {
         Message msg = MsgPicker.getMsg();
 
         if (cube.getStatus() == RealizationStatusEnum.DESCBROKEN) {
@@ -238,13 +237,13 @@ public class JobService extends BasicService implements InitializingBean {
                         sourcePartitionOffsetEnd);
                 src = source.enrichSourcePartitionBeforeBuild(cube, src);
                 newSeg = getCubeManager().appendSegment(cube, src);
-                job = EngineFactory.createBatchCubingJob(newSeg, submitter);
+                job = EngineFactory.createBatchCubingJob(newSeg, submitter, priorityOffset);
             } else if (buildType == CubeBuildTypeEnum.MERGE) {
                 newSeg = getCubeManager().mergeSegments(cube, tsRange, segRange, force);
                 job = EngineFactory.createBatchMergeJob(newSeg, submitter);
             } else if (buildType == CubeBuildTypeEnum.REFRESH) {
                 newSeg = getCubeManager().refreshSegment(cube, tsRange, segRange);
-                job = EngineFactory.createBatchCubingJob(newSeg, submitter);
+                job = EngineFactory.createBatchCubingJob(newSeg, submitter, priorityOffset);
             } else {
                 throw new BadRequestException(String.format(Locale.ROOT, msg.getINVALID_BUILD_TYPE(), buildType));
             }
@@ -479,6 +478,7 @@ public class JobService extends BasicService implements InitializingBean {
         Output output = cubeJob.getOutput();
         final JobInstance result = new JobInstance();
         result.setName(job.getName());
+        result.setProjectName(cubeJob.getProjectName());
         if (cube != null) {
             result.setRelatedCube(cube.getName());
             result.setDisplayCubeName(cube.getDisplayName());
@@ -513,6 +513,7 @@ public class JobService extends BasicService implements InitializingBean {
         Output output = job.getOutput();
         final JobInstance result = new JobInstance();
         result.setName(job.getName());
+        result.setProjectName(job.getProjectName());
         result.setRelatedCube(CubingExecutableUtil.getCubeName(job.getParams()));
         result.setRelatedSegment(CubingExecutableUtil.getSegmentId(job.getParams()));
         result.setLastModified(job.getLastModified());
@@ -546,6 +547,7 @@ public class JobService extends BasicService implements InitializingBean {
         Output output = checkpointExecutable.getOutput();
         final JobInstance result = new JobInstance();
         result.setName(job.getName());
+        result.setProjectName(checkpointExecutable.getProjectName());
         result.setRelatedCube(CubingExecutableUtil.getCubeName(job.getParams()));
         result.setDisplayCubeName(CubingExecutableUtil.getCubeName(job.getParams()));
         result.setLastModified(job.getLastModified());
@@ -635,10 +637,7 @@ public class JobService extends BasicService implements InitializingBean {
                 }
             }
 
-            CubeUpdate cubeBuilder = new CubeUpdate(cubeInstance);
-            cubeBuilder.setToRemoveSegs(toRemoveSegments.toArray(new CubeSegment[toRemoveSegments.size()]));
-            cubeBuilder.setCuboidsRecommend(Sets.<Long> newHashSet()); //Set recommend cuboids to be null
-            getCubeManager().updateCube(cubeBuilder);
+            getCubeManager().dropOptmizingSegments(cubeInstance, toRemoveSegments.toArray(new CubeSegment[] {}));
         }
 
         for (String jobId : jobIdList) {
@@ -659,11 +658,15 @@ public class JobService extends BasicService implements InitializingBean {
         }
     }
 
-    public JobInstance pauseJob(JobInstance job) {
+    public void pauseJob(JobInstance job) {
         aclEvaluate.checkProjectOperationPermission(job);
+        logger.info("Pause job [" + job.getId() + "] trigger by "
+            + SecurityContextHolder.getContext().getAuthentication().getName());
+        if (job.getStatus().isComplete()) {
+          throw new IllegalStateException(
+              "The job " + job.getId() + " has already been finished and cannot be stopped.");
+        }
         getExecutableManager().pauseJob(job.getId());
-        job.setStatus(JobStatusEnum.STOPPED);
-        return job;
     }
 
     public void dropJob(JobInstance job) {

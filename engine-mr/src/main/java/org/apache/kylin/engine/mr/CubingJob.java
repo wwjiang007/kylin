@@ -62,9 +62,8 @@ public class CubingJob extends DefaultChainedExecutable {
     public enum AlgorithmEnum {
         LAYER, INMEM
     }
-
     public enum CubingJobTypeEnum {
-        BUILD("BUILD", 20), OPTIMIZE("OPTIMIZE", 5), MERGE("MERGE", 25);
+        BUILD("BUILD", 20), OPTIMIZE("OPTIMIZE", 5), MERGE("MERGE", 25), STREAM("STREAM", 30);
 
         private final String name;
         private final int defaultPriority;
@@ -117,6 +116,10 @@ public class CubingJob extends DefaultChainedExecutable {
 
     public static CubingJob createMergeJob(CubeSegment seg, String submitter, JobEngineConfig config) {
         return initCubingJob(seg, CubingJobTypeEnum.MERGE.toString(), submitter, config);
+    }
+
+    public static CubingJob createStreamJob(CubeSegment seg, String submitter, JobEngineConfig config) {
+        return initCubingJob(seg, CubingJobTypeEnum.STREAM.toString(), submitter, config);
     }
 
     private static CubingJob initCubingJob(CubeSegment seg, String jobType, String submitter, JobEngineConfig config) {
@@ -247,6 +250,12 @@ public class CubingJob extends DefaultChainedExecutable {
         String title = MailNotificationUtil.getMailTitle("JOB", state.toString(), getDeployEnvName(), getProjectName(),
                 cubeInstance.getName());
         return Pair.newPair(title, content);
+    }
+
+    @Override
+    protected void onExecuteStart(ExecutableContext executableContext) {
+        KylinConfig.setAndUnsetThreadLocalConfig(getCubeSpecificConfig());
+        super.onExecuteStart(executableContext);
     }
 
     @Override
