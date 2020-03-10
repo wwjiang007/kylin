@@ -35,6 +35,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
+import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -434,8 +435,8 @@ public class GTAggregateScanner implements IGTScanner, IGTBypassChecker {
                 sumSpilledSize += dump.size();
                 // when spilled data is too much, we can modify it by other strategy.
                 // this means, all spilled data is bigger than half of original spillThreshold.
-                if(sumSpilledSize > spillThreshold) {
-                    for(Dump current : dumps) {
+                if (sumSpilledSize > spillThreshold) {
+                    for (Dump current : dumps) {
                         current.spill();
                     }
                     spillThreshold += sumSpilledSize;
@@ -678,7 +679,7 @@ public class GTAggregateScanner implements IGTScanner, IGTBypassChecker {
                                 + (dumpedFile == null ? "<null>" : dumpedFile.getAbsolutePath()));
                     }
 
-                    if(spillBuffer == null) {
+                    if (spillBuffer == null) {
                         dis = new DataInputStream(new FileInputStream(dumpedFile));
                     } else {
                         dis = new DataInputStream(new ByteArrayInputStream(spillBuffer));
@@ -698,13 +699,13 @@ public class GTAggregateScanner implements IGTScanner, IGTBypassChecker {
                                 cursorIdx++;
                                 int keyLen = dis.readInt();
                                 byte[] key = new byte[keyLen];
-                                dis.read(key);
+                                dis.readFully(key);
                                 int valueLen = dis.readInt();
                                 byte[] value = new byte[valueLen];
-                                dis.read(value);
+                                dis.readFully(value);
                                 return new Pair<>(key, value);
                             } catch (Exception e) {
-                                throw new RuntimeException(
+                                throw new NoSuchElementException(
                                         "Cannot read AggregationCache from dumped file: " + e.getMessage());
                             }
                         }
@@ -720,7 +721,8 @@ public class GTAggregateScanner implements IGTScanner, IGTBypassChecker {
             }
 
             public void spill() throws IOException {
-                if(spillBuffer == null) return;
+                if (spillBuffer == null)
+                    return;
                 OutputStream ops = new FileOutputStream(dumpedFile);
                 InputStream ips = new ByteArrayInputStream(spillBuffer);
                 IOUtils.copy(ips, ops);
@@ -729,7 +731,7 @@ public class GTAggregateScanner implements IGTScanner, IGTBypassChecker {
                 IOUtils.closeQuietly(ops);
 
                 logger.info("Spill buffer to disk, location: {}, size = {}.", dumpedFile.getAbsolutePath(),
-                    dumpedFile.length());
+                        dumpedFile.length());
             }
 
             public int size() {

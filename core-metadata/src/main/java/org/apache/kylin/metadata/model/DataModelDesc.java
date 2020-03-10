@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 
@@ -103,6 +104,9 @@ public class DataModelDesc extends RootPersistentEntity {
 
     @JsonProperty("capacity")
     private RealizationCapacity capacity = RealizationCapacity.MEDIUM;
+
+    @JsonProperty("projectName")
+    private String projectName; //for KYLIN-4080
 
     // computed attributes
     private TableRef rootFactTableRef;
@@ -282,10 +286,16 @@ public class DataModelDesc extends RootPersistentEntity {
     }
 
     public TblColRef findColumn(String table, String column) throws IllegalArgumentException {
+        TblColRef result = null;
         TableRef tableRef = findTable(table);
-        TblColRef result = tableRef.getColumn(column.toUpperCase(Locale.ROOT));
-        if (result == null)
-            throw new IllegalArgumentException("Column not found by " + table + "." + column);
+        if (Objects.nonNull(tableRef)) {
+            result = tableRef.getColumn(column.toUpperCase(Locale.ROOT));;
+        }
+
+        if (result == null) {//tiretree global domain dic
+            logger.warn("table {} column {} not found in its's model {} , maybe it's a tiretree global domain dict. ", table, column, getName() );
+        }
+
         return result;
     }
 
@@ -307,8 +317,9 @@ public class DataModelDesc extends RootPersistentEntity {
             }
         }
 
-        if (result == null)
-            throw new IllegalArgumentException("Column not found by " + input);
+        if (result == null) {
+            logger.warn("Column {} not found in its's model {} , maybe it's a tiretree global domain dict. ", column, getName() );
+        }
 
         return result;
     }
@@ -317,7 +328,7 @@ public class DataModelDesc extends RootPersistentEntity {
     public TableRef findTable(String table) throws IllegalArgumentException {
         TableRef result = tableNameMap.get(table.toUpperCase(Locale.ROOT));
         if (result == null) {
-            throw new IllegalArgumentException("Table not found by " + table);
+            logger.warn("table {} not found in its's model {} , maybe it's a tiretree global domain dict. ", table, getName() );
         }
         return result;
     }
@@ -342,13 +353,11 @@ public class DataModelDesc extends RootPersistentEntity {
     /**
      * @param isOnlineModel will affect the exposed view of project specific tables
      */
-    public void init(KylinConfig config, Map<String, TableDesc> tables, List<DataModelDesc> otherModels,
-            boolean isOnlineModel) {
-        initInternal(config, tables, otherModels, isOnlineModel);
+    public void init(KylinConfig config, Map<String, TableDesc> tables) {
+        initInternal(config, tables);
     }
 
-    public void initInternal(KylinConfig config, Map<String, TableDesc> tables, List<DataModelDesc> otherModels,
-            boolean isOnlineModel) {
+    public void initInternal(KylinConfig config, Map<String, TableDesc> tables) {
         this.config = config;
 
         initJoinTablesForUpgrade();
@@ -362,7 +371,7 @@ public class DataModelDesc extends RootPersistentEntity {
 
         boolean reinit = validate();
         if (reinit) { // model slightly changed by validate() and must init() again
-            initInternal(config, tables, otherModels, isOnlineModel);
+            initInternal(config, tables);
         }
     }
 
@@ -767,6 +776,14 @@ public class DataModelDesc extends RootPersistentEntity {
         return ProjectManager.getInstance(getConfig()).getProjectOfModel(this.getName());
     }
 
+    public String getProjectName() {
+        return projectName;
+    }
+
+    public void setProjectName(String projectName) {
+        this.projectName = projectName;
+    }
+
     public static DataModelDesc getCopyOf(DataModelDesc orig) {
         return copy(orig, new DataModelDesc());
     }
@@ -783,6 +800,7 @@ public class DataModelDesc extends RootPersistentEntity {
         copy.metrics = orig.metrics;
         copy.filterCondition = orig.filterCondition;
         copy.capacity = orig.capacity;
+        copy.projectName = orig.projectName;
         if (orig.getPartitionDesc() != null) {
             copy.partitionDesc = PartitionDesc.getCopyOf(orig.getPartitionDesc());
         }

@@ -23,6 +23,7 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.kylin.common.KylinConfig;
 import org.apache.kylin.common.util.ClassUtil;
 import org.apache.kylin.metadata.project.ProjectInstance;
@@ -37,20 +38,35 @@ import com.google.common.collect.Lists;
 public class QueryUtil {
 
     protected static final Logger logger = LoggerFactory.getLogger(QueryUtil.class);
-
+    private static final String KEYWORD_SELECT = "select";
+    private static final String KEYWORD_WITH = "with";
+    private static final String KEYWORD_EXPLAIN = "explain";
+    private static List<IQueryTransformer> queryTransformers;
     private QueryUtil() {
         throw new IllegalStateException("Class QueryUtil is an utility class !");
     }
 
-    private static List<IQueryTransformer> queryTransformers;
-
-    public interface IQueryTransformer {
-        String transform(String sql, String project, String defaultSchema);
+    public static String appendLimitOffsetToSql(String sql, int limit, int offset) {
+        String retSql = sql;
+        String prefixSql = "select * from (";
+        String suffixSql = ")";
+        if (StringUtils.startsWithIgnoreCase(sql, KEYWORD_EXPLAIN)
+                || StringUtils.startsWithIgnoreCase(sql, KEYWORD_WITH)) {
+            prefixSql = "";
+            suffixSql = "";
+        }
+        if (0 != limit && 0 != offset) {
+            retSql = prefixSql + sql + suffixSql + " limit " + String.valueOf(limit) + " offset "
+                    + String.valueOf(offset);
+        } else if (0 == limit && 0 != offset) {
+            retSql = prefixSql + sql + suffixSql + " offset " + String.valueOf(offset);
+        } else if (0 != limit && 0 == offset) {
+            retSql = prefixSql + sql + suffixSql + " limit " + String.valueOf(limit);
+        } else {
+            // do nothing
+        }
+        return retSql;
     }
-
-    static final String KEYWORD_SELECT = "select";
-    static final String KEYWORD_WITH = "with";
-    static final String KEYWORD_EXPLAIN = "explain";
 
     /**
      * @deprecated Deprecated because of KYLIN-3594
@@ -73,20 +89,24 @@ public class QueryUtil {
         Pattern pattern = Pattern.compile(suffixPattern);
         Matcher matcher = pattern.matcher(sql.toLowerCase(Locale.ROOT) + "  ");
 
+        int toAppendLimit = 0;
+        int toAppendOffset = 0;
         if (matcher.find()) {
             if (limit > 0 && matcher.group(1) == null) {
-                sql1 += ("\nLIMIT " + limit);
+                toAppendLimit = limit;
             }
             if (offset > 0 && matcher.group(2) == null) {
-                sql1 += ("\nOFFSET " + offset);
+                toAppendOffset = offset;
             }
         }
 
         // https://issues.apache.org/jira/browse/KYLIN-2649
         if (kylinConfig.getForceLimit() > 0 && limit <= 0 && matcher.group(1) == null
                 && sql1.toLowerCase(Locale.ROOT).matches("^select\\s+\\*\\p{all}*")) {
-            sql1 += ("\nLIMIT " + kylinConfig.getForceLimit());
+            toAppendLimit = kylinConfig.getForceLimit();
         }
+
+        sql1 = appendLimitOffsetToSql(sql1, toAppendLimit, toAppendOffset);
 
         // customizable SQL transformation
         if (queryTransformers == null) {
@@ -101,7 +121,8 @@ public class QueryUtil {
     /**
      * add remove catalog step at final
      */
-    public static String massageSql(String sql, String project, int limit, int offset, String defaultSchema, String catalog) {
+    public static String massageSql(String sql, String project, int limit, int offset, String defaultSchema,
+            String catalog) {
         String correctedSql = massageSql(sql, project, limit, offset, defaultSchema);
         correctedSql = removeCatalog(correctedSql, catalog);
         return correctedSql;
@@ -152,6 +173,11 @@ public class QueryUtil {
                 msg = "ArithmeticException: " + cause.getMessage();
                 break;
             }
+
+            if (cause.getClass().getName().contains("NumberFormatException")) {
+                msg = "NumberFormatException: " + cause.getMessage();
+                break;
+            }
             cause = cause.getCause();
         }
 
@@ -189,7 +215,7 @@ public class QueryUtil {
 
     public static String removeCommentInSql(String sql1) {
         // match two patterns, one is "-- comment", the other is "/* comment */"
-        final String[] commentPatterns = new String[]{"--(?!.*\\*/).*?[\r\n]", "/\\*(.|\r|\n)*?\\*/"};
+        final String[] commentPatterns = new String[] { "--(?!.*\\*/).*?[\r\n]", "/\\*(.|\r|\n)*?\\*/" };
 
         for (int i = 0; i < commentPatterns.length; i++) {
             sql1 = sql1.replaceAll(commentPatterns[i], "");
@@ -198,5 +224,9 @@ public class QueryUtil {
         sql1 = sql1.trim();
 
         return sql1;
+    }
+
+    public interface IQueryTransformer {
+        String transform(String sql, String project, String defaultSchema);
     }
 }

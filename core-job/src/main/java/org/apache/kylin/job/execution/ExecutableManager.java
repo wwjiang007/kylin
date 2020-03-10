@@ -21,6 +21,7 @@ package org.apache.kylin.job.execution;
 import static org.apache.kylin.job.constant.ExecutableConstants.MR_JOB_ID;
 import static org.apache.kylin.job.constant.ExecutableConstants.YARN_APP_ID;
 import static org.apache.kylin.job.constant.ExecutableConstants.YARN_APP_URL;
+import static org.apache.kylin.job.constant.ExecutableConstants.FLINK_JOB_ID;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -122,6 +123,7 @@ public class ExecutableManager {
 
     public void updateCheckpointJob(String jobId, List<AbstractExecutable> subTasksForCheck) {
         try {
+            jobId = jobId.replaceAll("[./]", "");
             final ExecutablePO job = executableDao.getJob(jobId);
             Preconditions.checkArgument(job != null, "there is no related job for job id:" + jobId);
 
@@ -140,6 +142,7 @@ public class ExecutableManager {
     //for ut
     public void deleteJob(String jobId) {
         try {
+            jobId = jobId.replaceAll("[./]", "");
             executableDao.deleteJob(jobId);
         } catch (PersistentException e) {
             logger.error("fail to delete job:" + jobId, e);
@@ -149,6 +152,7 @@ public class ExecutableManager {
 
     public AbstractExecutable getJob(String uuid) {
         try {
+            uuid = uuid.replaceAll("[./]", "");
             return parseTo(executableDao.getJob(uuid));
         } catch (PersistentException e) {
             logger.error("fail to get job:" + uuid, e);
@@ -166,6 +170,7 @@ public class ExecutableManager {
 
     public Output getOutput(String uuid) {
         try {
+            uuid = uuid.replaceAll("[./]", "");
             final ExecutableOutputPO jobOutput = executableDao.getJobOutput(uuid);
             Preconditions.checkArgument(jobOutput != null, "there is no related output for job id:" + uuid);
             return parseOutput(jobOutput);
@@ -348,7 +353,7 @@ public class ExecutableManager {
             List<AbstractExecutable> tasks = ((DefaultChainedExecutable) job).getTasks();
             for (AbstractExecutable task : tasks) {
                 if (task.getStatus() == ExecutableState.ERROR || task.getStatus() == ExecutableState.STOPPED) {
-                    updateJobOutput(task.getId(), ExecutableState.READY, null, null);
+                    updateJobOutput(task.getId(), ExecutableState.READY, null, "no output");
                     break;
                 }
             }
@@ -465,6 +470,9 @@ public class ExecutableManager {
                 jobOutput.setInfo(info);
             }
             if (output != null) {
+                if (output.length() > config.getJobOutputMaxSize()) {
+                    output = output.substring(0, config.getJobOutputMaxSize());
+                }
                 jobOutput.setContent(output);
             }
             executableDao.updateJobOutput(jobOutput);
@@ -549,10 +557,11 @@ public class ExecutableManager {
             }
         }
 
-        if (info.containsKey(YARN_APP_ID) && !StringUtils.isEmpty(config.getJobTrackingURLPattern())) {
+        if ((info.containsKey(YARN_APP_ID) || info.containsKey(FLINK_JOB_ID)) && !StringUtils.isEmpty(config.getJobTrackingURLPattern())) {
             String pattern = config.getJobTrackingURLPattern();
+            String jobId = info.containsKey(YARN_APP_ID) ? info.get(YARN_APP_ID) : info.get(FLINK_JOB_ID);
             try {
-                String newTrackingURL = String.format(Locale.ROOT, pattern, info.get(YARN_APP_ID));
+                String newTrackingURL = String.format(Locale.ROOT, pattern, jobId);
                 info.put(YARN_APP_URL, newTrackingURL);
             } catch (IllegalFormatException ife) {
                 logger.error("Illegal tracking url pattern: " + config.getJobTrackingURLPattern());

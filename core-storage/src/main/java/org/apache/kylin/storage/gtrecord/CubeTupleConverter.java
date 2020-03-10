@@ -19,10 +19,12 @@
 package org.apache.kylin.storage.gtrecord;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.TimeZone;
 
 import org.apache.kylin.common.KylinConfig;
 import org.apache.kylin.common.util.Array;
@@ -32,6 +34,7 @@ import org.apache.kylin.cube.CubeSegment;
 import org.apache.kylin.cube.cuboid.Cuboid;
 import org.apache.kylin.cube.model.CubeDesc.DeriveInfo;
 import org.apache.kylin.dict.lookup.ILookupTable;
+import org.apache.kylin.dimension.TimeDerivedColumnType;
 import org.apache.kylin.measure.MeasureType;
 import org.apache.kylin.measure.MeasureType.IAdvMeasureFiller;
 import org.apache.kylin.metadata.model.FunctionDesc;
@@ -65,6 +68,11 @@ public class CubeTupleConverter implements ITupleConverter {
     public final List<Integer> advMeasureIndexInGTValues;
     private List<ILookupTable> usedLookupTables;
 
+    final Set<Integer> timestampColumn = new HashSet<>();
+    String eventTimezone;
+    boolean autoJustByTimezone;
+    private final long timeZoneOffset;
+
     public final int nSelectedDims;
 
     public CubeTupleConverter(CubeSegment cubeSeg, Cuboid cuboid, //
@@ -84,7 +92,15 @@ public class CubeTupleConverter implements ITupleConverter {
         advMeasureFillers = Lists.newArrayListWithCapacity(1);
         advMeasureIndexInGTValues = Lists.newArrayListWithCapacity(1);
         usedLookupTables = Lists.newArrayList();
-
+        eventTimezone = cubeSeg.getConfig().getStreamingDerivedTimeTimezone();
+        autoJustByTimezone = eventTimezone.length() > 0
+                && cubeSeg.getCubeDesc().getModel().getRootFactTable().getTableDesc().isStreamingTable();
+        if (autoJustByTimezone) {
+            logger.debug("Will ajust dimsension for Time Derived Column.");
+            timeZoneOffset = TimeZone.getTimeZone(eventTimezone).getRawOffset();
+        } else {
+            timeZoneOffset = 0;
+        }
         ////////////
 
         int i = 0;
@@ -92,6 +108,10 @@ public class CubeTupleConverter implements ITupleConverter {
         // pre-calculate dimension index mapping to tuple
         for (TblColRef dim : selectedDimensions) {
             tupleIdx[i] = tupleInfo.hasColumn(dim) ? tupleInfo.getColumnIndex(dim) : -1;
+            if (TimeDerivedColumnType.isTimeDerivedColumn(dim.getName())
+                    && !TimeDerivedColumnType.isTimeDerivedColumnAboveDayLevel(dim.getName())) {
+                timestampColumn.add(tupleIdx[i]);
+            }
             i++;
         }
 
@@ -147,7 +167,20 @@ public class CubeTupleConverter implements ITupleConverter {
         for (int i = 0; i < nSelectedDims; i++) {
             int ti = tupleIdx[i];
             if (ti >= 0) {
-                tuple.setDimensionValue(ti, toString(gtValues[i]));
+                // add offset to return result according to timezone
+                if (autoJustByTimezone && timestampColumn.contains(ti)) {
+                    try {
+                        String v = toString(gtValues[i]);
+                        if (v != null) {
+                            tuple.setDimensionValue(ti, Long.toString(Long.parseLong(v) + timeZoneOffset));
+                        }
+                    } catch (NumberFormatException nfe) {
+                        logger.warn("{} is not a long value.", gtValues[i]);
+                        tuple.setDimensionValue(ti, toString(gtValues[i]));
+                    }
+                } else {
+                    tuple.setDimensionValue(ti, toString(gtValues[i]));
+                }
             }
         }
 

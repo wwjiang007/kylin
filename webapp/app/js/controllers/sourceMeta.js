@@ -27,6 +27,8 @@ KylinApp
     $scope.window = 0.68 * $window.innerHeight;
     $scope.tableConfig = tableConfig;
     $scope.isCalculate = true;
+    $scope.selectedTsPattern = '';
+    $scope.selfDefinedTsPattern = false;
 
     $scope.state = {
       filterAttr: 'id', filterReverse: false, reverseColumn: 'id',
@@ -483,6 +485,31 @@ KylinApp
 
     }
 
+    $scope.editStreamingConfigV2 = function(streamingConfig){
+      var modalInstance = $modal.open({
+        templateUrl: 'editStreamingTableV2.html',
+        controller: EditStreamingSourceV2Ctrl,
+        backdrop : 'static',
+        resolve: {
+          streamingConfig: function () {
+            return streamingConfig;
+          },
+          projectName: function () {
+            return $scope.projectModel.selectedProject;
+          },
+          scope: function () {
+            return $scope;
+          }
+        }
+      });
+
+      modalInstance.result.then(function () {
+        $scope.$broadcast('StreamingConfigEdited');
+      }, function () {
+        $scope.$broadcast('StreamingConfigEdited');
+      });
+    }
+
     //streaming model
     $scope.openStreamingSourceModal = function () {
       if(!$scope.projectModel.selectedProject){
@@ -506,7 +533,19 @@ KylinApp
         }
       });
     };
-
+    function bootstrapServerValidation(bootstrapServers) {
+      var flag = false;
+      if (bootstrapServers && bootstrapServers.length > 0) {
+        angular.forEach(bootstrapServers, function(bootstrapServer, ind) {
+          if (!bootstrapServer.host || !bootstrapServer.port || bootstrapServer.host.length === 0 || bootstrapServer.port.length === 0) {
+            flag = true;
+          }
+        });
+      } else {
+        flag = true;
+      }
+      return flag;
+    };
     var EditStreamingSourceCtrl = function ($scope, $interpolate, $templateCache, tableName, $modalInstance, tableNames, MessageService, projectName, scope, tableConfig,cubeConfig,StreamingModel,StreamingService) {
 
       $scope.state = {
@@ -528,12 +567,6 @@ KylinApp
       $scope.updateKafkaMeta = function(val){
         $scope.kafkaMeta = val;
       }
-
-      $scope.streamingResultTmpl = function (notification) {
-        // Get the static notification template.
-        var tmpl = notification.type == 'success' ? 'streamingResultSuccess.html' : 'streamingResultError.html';
-        return $interpolate($templateCache.get(tmpl))(notification);
-      };
 
       $scope.updateStreamingSchema = function(){
         StreamingService.update({}, {
@@ -577,6 +610,61 @@ KylinApp
         })
       }
 
+    }
+
+    var EditStreamingSourceV2Ctrl = function ($scope, ResponseUtil, $modalInstance, projectName,StreamingServiceV2, streamingConfig) {
+      $scope.cancel = function () {
+        $modalInstance.dismiss('cancel');
+      };
+      $scope.streamingConfig = streamingConfig;
+      $scope.streamingConfig.properties.bootstrapServers = streamingConfig.properties['bootstrap.servers'].split(',').map(function(address){
+        return {
+          host: address.split(':')[0],
+          port: +address.split(':')[1]
+        }
+      })
+      $scope.addBootstrapServer = function() {
+        if (!$scope.streamingConfig.properties.bootstrapServers) {
+          $scope.streamingConfig.properties.bootstrapServers = [];
+        }
+        $scope.streamingConfig.properties.bootstrapServers.push({host: '', port: 9092});
+      }
+      $scope.removeBootstrapServer = function(index) {
+        $scope.streamingConfig.properties.bootstrapServers.splice(index, 1);
+      };
+      $scope.projectName = projectName;
+      $scope.updateStreamingMeta = function(val){
+        $scope.streamingMeta = val;
+      }
+      $scope.updateKafkaMeta = function(val){
+        $scope.kafkaMeta = val;
+      }
+      $scope.bootstrapServerValidation = bootstrapServerValidation
+      $scope.updateStreamingV2Config = function(){
+        loadingRequest.show();
+        $scope.streamingConfig.properties['bootstrap.servers'] = $scope.streamingConfig.properties.bootstrapServers.map(function(address){
+          return address.host + ':' + address.port;
+        }).join(',');
+        delete $scope.streamingConfig.properties.bootstrapServers;
+        var updateConfig = {
+          project: $scope.projectName,
+          streamingConfig: JSON.stringify($scope.streamingConfig)
+        }
+        StreamingServiceV2.update({}, updateConfig, function (request) {
+          if (request.successful) {
+            MessageBox.successNotify('Updated the streaming successfully.');
+            $scope.cancel();
+          } else {
+            ResponseUtil.handleError({
+              data: {exception: request.message}
+            })
+          }
+          loadingRequest.hide();
+        }, function (e) {
+          ResponseUtil.handleError(e)
+          loadingRequest.hide();
+        })
+      }
     }
     // 推断列的类型
     function checkColumnValType(val,key){
@@ -964,6 +1052,8 @@ KylinApp
             template: '',
             dataTypeArr: tableConfig.dataTypes,
             TSColumnArr: [],
+            TSPatternArr: ['MS', 'S'],
+            TSParserArr: ['org.apache.kylin.stream.source.kafka.LongTimeParser', 'org.apache.kylin.stream.source.kafka.DateTimeParser'],
             TSColumnSelected: '',
             TSParser: 'org.apache.kylin.stream.source.kafka.LongTimeParser',
             TSPattern: 'MS',
@@ -1002,19 +1092,7 @@ KylinApp
         $scope.streamingConfig.properties.bootstrapServers.push({host: '', port: '9092'});
       }
 
-      $scope.bootstrapServerValidation = function(bootstrapServers) {
-        var flag = false;
-        if (bootstrapServers && bootstrapServers.length > 0) {
-          angular.forEach(bootstrapServers, function(bootstrapServer, ind) {
-            if (!bootstrapServer.host || !bootstrapServer.port || bootstrapServer.host.length === 0 || bootstrapServer.port.length === 0) {
-              flag = true;
-            }
-          });
-        } else {
-          flag = true;
-        }
-        return flag;
-      };
+      $scope.bootstrapServerValidation = bootstrapServerValidation;
 
       // streaming table
       $scope.streaming = {
@@ -1216,6 +1294,34 @@ KylinApp
               $scope.streaming.TSColumnSelected = '';
             }
           }
+        }
+      };
+
+      $scope.updateDateTimeParserOption = function(parser) {
+        if (parser === $scope.streaming.TSParserArr[0]) {
+          $scope.streaming.TSPatternArr = [];
+          $scope.streaming.TSPatternArr.push('MS');
+          $scope.streaming.TSPatternArr.push('S');
+          $scope.streaming.TSPattern = 'MS';
+        } else if (parser === $scope.streaming.TSParserArr[1]) {
+          $scope.streaming.TSPatternArr = [];
+          TableService.getSupportedDatetimePatterns({}, function (patterns) {
+            $scope.streaming.TSPatternArr = patterns;
+            $scope.streaming.TSPatternArr.push('--- Other ---');
+            $scope.streaming.TSPattern = 'yyyy-MM-dd HH:mm:ss.SSS';
+          }, function (e) {
+            return;
+          });
+        }
+      };
+
+      $scope.updateTsPatternOption = function(pattern) {
+        if (pattern === '--- Other ---') {
+          $scope.selfDefinedTsPattern = true;
+          $scope.streaming.TSPattern = '';
+        } else {
+          $scope.selfDefinedTsPattern = pattern;
+          $scope.selfDefinedTsPattern = false;
         }
       };
 

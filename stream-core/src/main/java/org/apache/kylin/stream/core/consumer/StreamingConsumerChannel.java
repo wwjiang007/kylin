@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.kylin.stream.core.exception.StreamingException;
 import org.apache.kylin.stream.core.metrics.StreamingMetrics;
@@ -52,10 +53,10 @@ public class StreamingConsumerChannel implements Runnable {
     private StreamingSegmentManager cubeSegmentManager;
     private volatile IStopConsumptionCondition stopCondition;
     private volatile long minAcceptEventTime;
-    private volatile long parseEventErrorCnt;
-    private volatile long addEventErrorCnt;
-    private volatile long incomingEventCnt;
-    private volatile long dropEventCnt;
+    private AtomicLong parseEventErrorCnt = new AtomicLong(0);
+    private AtomicLong addEventErrorCnt = new AtomicLong(0);
+    private AtomicLong incomingEventCnt = new AtomicLong(0);
+    private AtomicLong dropEventCnt = new AtomicLong(0);
     private Map<Integer, Meter> eventConsumeMeters;
 
     public StreamingConsumerChannel(String cubeName, IStreamingConnector connector,
@@ -80,6 +81,7 @@ public class StreamingConsumerChannel implements Runnable {
 
     public void start() {
         this.consumerThread = new Thread(this, cubeName + "_channel");
+        consumerThread.setPriority(Thread.MAX_PRIORITY); // Improve the priority of consumer thread to make ingest rate stable
         connector.open();
         consumerThread.start();
     }
@@ -95,7 +97,7 @@ public class StreamingConsumerChannel implements Runnable {
                         Thread.sleep(100);
                         continue;
                     }
-                    incomingEventCnt++;
+                    incomingEventCnt.incrementAndGet();
                     recordConsumeMetric(event.getSourcePosition().getPartition(), event.getParams());
                     if (!stopCondition.isSatisfied(event)) {
                         if (!isFilter(event)) {
@@ -106,16 +108,16 @@ public class StreamingConsumerChannel implements Runnable {
                         this.stopped = true;
                     }
                 } catch (MessageFormatException mfe) {
-                    parseEventErrorCnt++;
-                    if (parseEventErrorCnt % 1000 < 3) {
+                    long countValue = parseEventErrorCnt.incrementAndGet();
+                    if (countValue % 1000 < 3) {
                         logger.error(mfe.getMessage(), mfe);
                     }
                 } catch (InterruptedException ie) {
                     logger.warn("interrupted!");
                     stopped = true;
                 } catch (Exception e) {
-                    addEventErrorCnt++;
-                    if (addEventErrorCnt % 1000 < 3) {
+                    long countValue = addEventErrorCnt.incrementAndGet();
+                    if (countValue % 1000 < 3) {
                         logger.error("error happens when save event:" + event, e);
                     }
                 }
@@ -144,8 +146,8 @@ public class StreamingConsumerChannel implements Runnable {
 
     private void removeMetrics() {
         for (Map.Entry<Integer, Meter> meterEntry : eventConsumeMeters.entrySet()) {
-            StreamingMetrics.getInstance().getMetrics().remove(MetricRegistry.name(StreamingMetrics.CONSUME_RATE_PFX,
-                    cubeName, String.valueOf(meterEntry.getKey())));
+            StreamingMetrics.getInstance().getMetricRegistry().remove(MetricRegistry
+                    .name(StreamingMetrics.CONSUME_RATE_PFX, cubeName, String.valueOf(meterEntry.getKey())));
         }
     }
 
@@ -161,9 +163,9 @@ public class StreamingConsumerChannel implements Runnable {
 
     private boolean isFilter(StreamingMessage event) {
         if (minAcceptEventTime != 0 && event.getTimestamp() < minAcceptEventTime) {
-            dropEventCnt++;
+            long countValue = dropEventCnt.incrementAndGet();
             // drop events is less than the min accepted event time
-            if (dropEventCnt % 1000 <= 1) {
+            if (countValue % 1000 <= 1) {
                 logger.warn("event dropped, event time {}, min event accept time {}", event.getTimestamp(),
                         minAcceptEventTime);
             }
@@ -177,6 +179,9 @@ public class StreamingConsumerChannel implements Runnable {
         }
     }
 
+    /**
+     * Called by another thread.
+     */
     public void stop(long timeoutInMs) {
         this.stopped = true;
         waitConsumerStop(timeoutInMs);
@@ -210,6 +215,9 @@ public class StreamingConsumerChannel implements Runnable {
         }
     }
 
+    /**
+     * Called by another thread.
+     */
     public void pause(boolean wait) {
         this.paused = true;
         if (wait) {
@@ -223,6 +231,9 @@ public class StreamingConsumerChannel implements Runnable {
         }
     }
 
+    /**
+     * Called by another thread.
+     */
     public void resumeToStopCondition(IStopConsumptionCondition newStopCondition) {
         this.paused = false;
         if (newStopCondition != IStopConsumptionCondition.NEVER_STOP) {
@@ -238,6 +249,9 @@ public class StreamingConsumerChannel implements Runnable {
         }
     }
 
+    /**
+     * Called by another thread.
+     */
     public void resume() {
         this.paused = false;
     }
@@ -255,7 +269,8 @@ public class StreamingConsumerChannel implements Runnable {
     }
 
     public ConsumerStats getConsumerStats() {
-        Map<Integer, Long> consumeLagMap = connector.getSource().calConsumeLag(cubeName, cubeSegmentManager.getConsumePosition());
+        Map<Integer, Long> consumeLagMap = connector.getSource().calConsumeLag(cubeName,
+                cubeSegmentManager.getConsumePosition());
         long totalLag = 0L;
         Map<Integer, PartitionConsumeStats> partitionConsumeStatsMap = Maps.newHashMap();
         for (Map.Entry<Integer, Meter> meterEntry : eventConsumeMeters.entrySet()) {
@@ -281,8 +296,8 @@ public class StreamingConsumerChannel implements Runnable {
         ConsumerStats stats = new ConsumerStats();
         stats.setStopped(stopped);
         stats.setPaused(paused);
-        stats.setTotalIncomingEvents(incomingEventCnt);
-        stats.setTotalExceptionEvents(parseEventErrorCnt + addEventErrorCnt);
+        stats.setTotalIncomingEvents(incomingEventCnt.get());
+        stats.setTotalExceptionEvents(parseEventErrorCnt.get() + addEventErrorCnt.get());
         stats.setPartitionConsumeStatsMap(partitionConsumeStatsMap);
         stats.setConsumeOffsetInfo(getSourceConsumeInfo());
         stats.setConsumeLag(totalLag);

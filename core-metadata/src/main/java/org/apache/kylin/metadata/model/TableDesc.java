@@ -28,7 +28,6 @@ import org.apache.kylin.common.persistence.ResourceStore;
 import org.apache.kylin.common.persistence.RootPersistentEntity;
 import org.apache.kylin.common.util.Pair;
 import org.apache.kylin.common.util.StringSplitter;
-import org.apache.kylin.metadata.MetadataConstants;
 import org.apache.kylin.metadata.project.ProjectInstance;
 import org.apache.kylin.metadata.project.ProjectManager;
 import org.slf4j.Logger;
@@ -51,6 +50,32 @@ public class TableDesc extends RootPersistentEntity implements ISourceAware {
 
     private static final String TABLE_TYPE_VIRTUAL_VIEW = "VIRTUAL_VIEW";
 
+    public static class TableProject {
+       private String table;
+       private String project;
+
+        TableProject(String table, String project) {
+            this.table = table;
+            this.project = project;
+        }
+
+        public String getTable() {
+            return table;
+        }
+
+        public void setTable(String table) {
+            this.table = table;
+        }
+
+        public String getProject() {
+            return project;
+        }
+
+        public void setProject(String project) {
+            this.project = project;
+        }
+    }
+
     public static String concatRawResourcePath(String nameOnPath) {
         return ResourceStore.TABLE_RESOURCE_ROOT + "/" + nameOnPath + ".json";
     }
@@ -65,8 +90,7 @@ public class TableDesc extends RootPersistentEntity implements ISourceAware {
         return concatRawResourcePath(makeResourceName(tableIdentity, prj));
     }
 
-    // returns <table, project>
-    public static Pair<String, String> parseResourcePath(String path) {
+    public static TableProject parseResourcePath(String path) {
         if (path.endsWith(".json"))
             path = path.substring(0, path.length() - ".json".length());
 
@@ -84,7 +108,7 @@ public class TableDesc extends RootPersistentEntity implements ISourceAware {
             table = path;
             prj = null;
         }
-        return Pair.newPair(table, prj);
+        return new TableProject(table, prj);
     }
 
     // ============================================================================
@@ -217,18 +241,6 @@ public class TableDesc extends RootPersistentEntity implements ISourceAware {
                     .toUpperCase(Locale.ROOT);
         }
         return identity;
-    }
-
-    public String getIdentityQuoted(String quot) {
-        String dbName = quot + this.getDatabase() + quot;
-        String tableName = quot + this.getName() + quot;
-        return String.format(Locale.ROOT, "%s.%s", dbName, tableName).toUpperCase(Locale.ROOT);
-    }
-
-    public String getFactTableQuoted(String quot) {
-        String database = quot + config.getHiveDatabaseForIntermediateTable() + quot;
-        String table = quot + this.getName() + "_fact" + quot;
-        return database + "." + table;
     }
 
     public boolean isView() {
@@ -373,14 +385,14 @@ public class TableDesc extends RootPersistentEntity implements ISourceAware {
     }
 
     public String getMaterializedName() {
-        return MetadataConstants.KYLIN_INTERMEDIATE_PREFIX + database.getName() + "_" + name;
+        return config.getHiveIntermediateTablePrefix() + database.getName() + "_" + name;
     }
 
     public String getMaterializedName(String uuid) {
         if (uuid == null) {
             return getMaterializedName();
         } else
-            return MetadataConstants.KYLIN_INTERMEDIATE_PREFIX + database.getName() + "_" + name + "_"
+            return config.getHiveIntermediateTablePrefix() + database.getName() + "_" + name + "_"
                     + uuid.replaceAll("-", "_");
     }
 

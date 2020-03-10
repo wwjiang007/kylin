@@ -40,6 +40,41 @@ public class QueryUtilTest extends LocalFileMetadataTestCase {
     }
 
     @Test
+    public void testappendLimitOffsetToSql() {
+        {
+            String sql = "select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact";
+            String newsql = QueryUtil.appendLimitOffsetToSql(sql, 100, 100);
+            Assert.assertEquals(
+                    "select * from (select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact) limit 100 offset 100",
+                    newsql);
+        }
+
+        {
+            String sql = "select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact";
+            String newsql = QueryUtil.appendLimitOffsetToSql(sql, 0, 0);
+            Assert.assertEquals(
+                    "select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact",
+                    newsql);
+        }
+
+        {
+            String sql = "explain plan for select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact";
+            String newsql = QueryUtil.appendLimitOffsetToSql(sql, 100, 100);
+            Assert.assertEquals(
+                    "explain plan for select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact limit 100 offset 100",
+                    newsql);
+        }
+
+        {
+            String sql = "explain plan for select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact";
+            String newsql = QueryUtil.appendLimitOffsetToSql(sql, 0, 0);
+            Assert.assertEquals(
+                    "explain plan for select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact",
+                    newsql);
+        }
+    }
+
+    @Test
     public void testMassageSql() {
         {
             String sql = "select ( date '2001-09-28' + interval floor(1.2) day) from test_kylin_fact";
@@ -57,24 +92,21 @@ public class QueryUtilTest extends LocalFileMetadataTestCase {
             String sql = "select count(*) test_limit from test_kylin_fact where price > 10.0";
             String s = QueryUtil.massageSql(sql, "default", 50000, 0, "DEFAULT");
             Assert.assertEquals(
-                    "select count(*) test_limit from test_kylin_fact where price > 10.0\n" +
-                            "LIMIT 50000",
+                    "select * from (select count(*) test_limit from test_kylin_fact where price > 10.0) limit 50000",
                     s);
         }
         {
             String sql = "select count(*) test_offset from test_kylin_fact where price > 10.0";
             String s = QueryUtil.massageSql(sql, "default", 0, 50, "DEFAULT");
             Assert.assertEquals(
-                    "select count(*) test_offset from test_kylin_fact where price > 10.0\n" +
-                            "OFFSET 50",
+                    "select * from (select count(*) test_offset from test_kylin_fact where price > 10.0) offset 50",
                     s);
         }
         {
             String sql = "select count(*) test_limit_and_offset from test_kylin_fact where price > 10.0";
             String s = QueryUtil.massageSql(sql, "default", 50000, 50, "DEFAULT");
             Assert.assertEquals(
-                    "select count(*) test_limit_and_offset from test_kylin_fact where price > 10.0\n" +
-                            "LIMIT 50000\nOFFSET 50",
+                    "select * from (select count(*) test_limit_and_offset from test_kylin_fact where price > 10.0) limit 50000 offset 50",
                     s);
         }
 
@@ -84,7 +116,7 @@ public class QueryUtilTest extends LocalFileMetadataTestCase {
             newLine = newLine.replace("\r", " ").replace("\n", newLine);
             String s = QueryUtil.massageSql(sql, "default", 50000, 0, "DEFAULT");
             Assert.assertEquals(
-                    "select count(*)     test_limit from " + newLine + "test_kylin_fact where price > 10.0\nLIMIT 50000",
+                    "select * from (select count(*)     test_limit from " + newLine + "test_kylin_fact where price > 10.0) limit 50000",
                     s);
         }
         {
@@ -93,7 +125,7 @@ public class QueryUtilTest extends LocalFileMetadataTestCase {
             newLine = newLine.replace("\r", " ").replace("\n", newLine);
             String s = QueryUtil.massageSql(sql, "default", 50000, 0, "DEFAULT");
             Assert.assertEquals(
-                    "select count(*)     test_offset from " + newLine + "test_kylin_fact where price > 10.0\nLIMIT 50000",
+                    "select * from (select count(*)     test_offset from " + newLine + "test_kylin_fact where price > 10.0) limit 50000",
                     s);
         }
         {
@@ -102,7 +134,7 @@ public class QueryUtilTest extends LocalFileMetadataTestCase {
             newLine = newLine.replace("\r", " ").replace("\n", newLine);
             String s = QueryUtil.massageSql(sql, "default", 50000, 0, "DEFAULT");
             Assert.assertEquals(
-                    "select count(*)     test_limit_and_offset from " + newLine + "test_kylin_fact where price > 10.0\nLIMIT 50000",
+                    "select * from (select count(*)     test_limit_and_offset from " + newLine + "test_kylin_fact where price > 10.0) limit 50000",
                     s);
         }
     }
@@ -158,7 +190,7 @@ public class QueryUtilTest extends LocalFileMetadataTestCase {
         KylinConfig.getInstanceFromEnv().setProperty("kylin.query.force-limit", "10");
         String sql1 = "select   * \nfrom DEFAULT.TEST_KYLIN_FACT";
         String result = QueryUtil.massageSql(sql1, "default", 0, 0, "DEFAULT");
-        Assert.assertEquals("select   * \nfrom DEFAULT.TEST_KYLIN_FACT\nLIMIT 10", result);
+        Assert.assertEquals("select * from (select   * \nfrom DEFAULT.TEST_KYLIN_FACT) limit 10", result);
 
         String sql2 = "select   2 * 8 from DEFAULT.TEST_KYLIN_FACT";
         result = QueryUtil.massageSql(sql2, "default", 0, 0, "DEFAULT");
@@ -310,5 +342,25 @@ public class QueryUtilTest extends LocalFileMetadataTestCase {
             String after = afterRemoveSql[i];
             Assert.assertEquals(after, QueryUtil.removeCatalog(before, catalog));
         }
+    }
+
+    @Test
+    public void testLimitAndOffset() {
+        String sql = "select e_name from employees_china union select e_name from employees_usa";
+        String result1 = QueryUtil.massageSql(sql, "default", 0, 0, "DEFAULT");
+        Assert.assertEquals(result1, "select e_name from employees_china union " +
+                "select e_name from employees_usa");
+
+        String result2 = QueryUtil.massageSql(sql, "default", 10, 0, "DEFAULT");
+        Assert.assertEquals(result2, "select * from (select e_name from employees_china union " +
+                "select e_name from employees_usa) limit 10");
+
+        String result3 = QueryUtil.massageSql(sql, "default", 0, 5, "DEFAULT");
+        Assert.assertEquals(result3, "select * from (select e_name from employees_china union " +
+                "select e_name from employees_usa) offset 5");
+
+        String result4 = QueryUtil.massageSql(sql, "default", 10, 5, "DEFAULT");
+        Assert.assertEquals(result4, "select * from (select e_name from employees_china union " +
+                "select e_name from employees_usa) limit 10 offset 5");
     }
 }

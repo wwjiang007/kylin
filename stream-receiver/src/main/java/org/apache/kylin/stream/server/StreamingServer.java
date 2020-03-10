@@ -33,7 +33,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.io.FileUtils;
 import org.apache.curator.framework.CuratorFramework;
@@ -60,6 +59,7 @@ import org.apache.kylin.stream.coordinator.StreamMetadataStoreFactory;
 import org.apache.kylin.stream.coordinator.StreamingUtils;
 import org.apache.kylin.stream.coordinator.client.CoordinatorClient;
 import org.apache.kylin.stream.coordinator.client.HttpCoordinatorClient;
+import org.apache.kylin.stream.coordinator.coordinate.annotations.NotAtomicIdempotent;
 import org.apache.kylin.stream.core.consumer.ConsumerStartProtocol;
 import org.apache.kylin.stream.core.consumer.EndPositionStopCondition;
 import org.apache.kylin.stream.core.consumer.IConsumerProvider;
@@ -118,15 +118,14 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
     private ScheduledExecutorService segmentStateCheckerExecutor;
     private ExecutorService segmentFlushExecutor;
 
-    private String baseStorePath;
+    private final String baseStorePath;
 
     private StreamingServer() {
         streamZKClient = StreamingUtils.getZookeeperClient();
         streamMetadataStore = StreamMetadataStoreFactory.getStreamMetaDataStore();
         coordinatorClient = new HttpCoordinatorClient(streamMetadataStore);
         currentNode = NodeUtil.getCurrentNode(DEFAULT_PORT);
-        baseStorePath = KylinConfig.getInstanceFromEnv().getStreamingIndexPath();
-
+        baseStorePath = calLocalSegmentCacheDir();
         segmentStateCheckerExecutor = Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory(
                 "segment_state_check"));
         segmentFlushExecutor = Executors.newFixedThreadPool(5, new NamedThreadFactory("segment_flush"));
@@ -160,10 +159,19 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
             @Override
             public void run() {
                 Collection<StreamingSegmentManager> segmentManagers = getAllCubeSegmentManagers();
+                long curr = System.currentTimeMillis();
                 for (StreamingSegmentManager segmentManager : segmentManagers) {
                     CubeInstance cubeInstance = segmentManager.getCubeInstance();
                     String cubeName = cubeInstance.getName();
                     try {
+                        Collection<StreamingCubeSegment> activeSegments = segmentManager.getActiveSegments();
+                        for (StreamingCubeSegment segment : activeSegments) {
+                            long delta = curr - segment.getLastUpdateTime();
+                            if (curr > segment.getDateRangeEnd() && delta > segmentManager.cubeDuration) {
+                                logger.debug("Make {} immutable because it lastUpdate[{}] exceed wait duration.", segment.getSegmentName(), segment.getLastUpdateTime());
+                                segmentManager.makeSegmentImmutable(segment.getSegmentName());
+                            }
+                        }
                         RetentionPolicyInfo retentionPolicyInfo = new RetentionPolicyInfo();
                         String policyName = cubeInstance.getConfig().getStreamingSegmentRetentionPolicy();
                         Map<String, String> policyProps = cubeInstance.getConfig()
@@ -204,6 +212,7 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
         }
     }
 
+    @NotAtomicIdempotent
     private void sendSegmentsToFullBuild(String cubeName, StreamingSegmentManager segmentManager,
             Collection<StreamingCubeSegment> segments) throws Exception {
         List<Future<?>> futureList = Lists.newArrayList();
@@ -220,7 +229,7 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
         int i = 0;
         for (StreamingCubeSegment segment : segments) {
             futureList.get(i).get();
-            logger.info("save remote store state to metadata store.");
+            logger.info("Save remote store state to metadata store.");
             streamMetadataStore.addCompleteReplicaSetForSegmentBuild(segment.getCubeName(), segment.getSegmentName(),
                     replicaSetID);
 
@@ -230,16 +239,15 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
             streamMetadataStore.saveSourceCheckpoint(segment.getCubeName(), segment.getSegmentName(), replicaSetID,
                     smallestSourcePosStr);
 
-            logger.info("send notification to coordinator for cube {} segment {}.", cubeName, segment.getSegmentName());
+            logger.info("Send notification to coordinator for cube {} segment {}.", cubeName, segment.getSegmentName());
             coordinatorClient.segmentRemoteStoreComplete(currentNode, segment.getCubeName(),
                     new Pair<>(segment.getDateRangeStart(), segment.getDateRangeEnd()));
-            logger.info("send notification success.");
+            logger.info("Send notification success.");
             segment.saveState(StreamingCubeSegment.State.REMOTE_PERSISTED);
-            logger.info("cube {} segment {}  status converted to {}", segment.getCubeName(), segment.getSegmentName(),
+            logger.info("Commit cube {} segment {}  status converted to {}.", segment.getCubeName(), segment.getSegmentName(),
                     StreamingCubeSegment.State.REMOTE_PERSISTED.name());
             i++;
         }
-
     }
 
     private void purgeSegments(String cubeName, Collection<StreamingCubeSegment> segments,
@@ -290,7 +298,7 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
     }
 
     private void registerReceiver() throws Exception {
-        logger.info("register receiver:" + currentNode);
+        logger.info("register receiver: {}", currentNode);
         streamMetadataStore.addReceiver(currentNode);
     }
 
@@ -352,7 +360,7 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
     }
 
     public synchronized ConsumerStatsResponse stopConsumer(String cube) {
-        logger.info("stop consumers for cube: " + cube);
+        logger.info("stop consumers for cube: {}", cube);
         ConsumerStatsResponse response = new ConsumerStatsResponse();
         StreamingConsumerChannel consumer = cubeConsumerMap.get(cube);
         if (consumer != null) {
@@ -372,7 +380,7 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
     }
 
     public synchronized ConsumerStatsResponse pauseConsumer(String cubeName) {
-        logger.info("pause consumers for cube: " + cubeName);
+        logger.info("pause consumers for cube: {}", cubeName);
         ConsumerStatsResponse response = new ConsumerStatsResponse();
         response.setCubeName(cubeName);
         StreamingConsumerChannel consumer = cubeConsumerMap.get(cubeName);
@@ -380,18 +388,18 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
             consumer.pause(true);
             response.setConsumePosition(consumer.getSourceConsumeInfo());
         } else {
-            logger.warn("the consumer for cube:{} does not exist " + cubeName);
+            logger.warn("the consumer for cube:{} does not exist ", cubeName);
         }
         return response;
     }
 
     public synchronized ConsumerStatsResponse resumeConsumer(String cubeName, String resumeToPosition) {
-        logger.info("resume consumers for cube: " + cubeName);
+        logger.info("resume consumers for cube: {}", cubeName);
         ConsumerStatsResponse response = new ConsumerStatsResponse();
         response.setCubeName(cubeName);
         StreamingConsumerChannel consumer = cubeConsumerMap.get(cubeName);
         if (consumer == null) {
-            logger.warn("the consumer for cube:{} does not exist " + cubeName);
+            logger.warn("the consumer for cube:{} does not exist", cubeName);
             return response;
         }
         KylinConfig kylinConfig = KylinConfig.getInstanceFromEnv();
@@ -478,8 +486,10 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
             Map<String, SegmentStats> segmentStatsMap = segmentManager.getSegmentStats();
             receiverCubeStats.setSegmentStatsMap(segmentStatsMap);
             receiverCubeStats.setTotalIngest(segmentManager.getIngestCount());
-            receiverCubeStats.setLatestEventTime(segmentManager.getLatestEventTime());
-            receiverCubeStats.setLatestEventIngestTime(segmentManager.getLatestEventIngestTime());
+            receiverCubeStats.setLatestEventTime(
+                    StreamingSegmentManager.resetTimestampByTimeZone(segmentManager.getLatestEventTime()));
+            receiverCubeStats.setLatestEventIngestTime(
+                    StreamingSegmentManager.resetTimestampByTimeZone(segmentManager.getLatestEventIngestTime()));
             receiverCubeStats.setLongLatencyInfo(segmentManager.getLongLatencyInfo());
         }
         return receiverCubeStats;
@@ -607,6 +617,7 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
         StreamingSegmentManager segmentManager = getStreamingSegmentManager(cubeName);
         if (segmentManager != null) {
             streamingSegmentManagerMap.remove(cubeName);
+            segmentManager.close();
             segmentManager.purgeAllSegments();
         }
     }
@@ -695,6 +706,26 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
                 cubeInstance.getRootFactTable());
     }
 
+    private String calLocalSegmentCacheDir() {
+        String kylinHome = KylinConfig.getKylinHome();
+        String indexPathStr = KylinConfig.getInstanceFromEnv().getStreamingIndexPath();
+        String localSegmentCachePath;
+        File indexPath = new File(indexPathStr);
+
+        if (indexPath.isAbsolute()) {
+            localSegmentCachePath = indexPathStr;
+        } else {
+            if (kylinHome != null && !kylinHome.equals("")) {
+                File localSegmentFile = new File(kylinHome, indexPathStr);
+                localSegmentCachePath = localSegmentFile.getAbsolutePath();
+            } else {
+                localSegmentCachePath = indexPathStr;
+            }
+        }
+        logger.info("Using {} to store local segment cache.", localSegmentCachePath);
+        return localSegmentCachePath;
+    }
+
     private static class SegmentHDFSFlusher implements Runnable {
         private final Logger logger = LoggerFactory.getLogger(SegmentHDFSFlusher.class);
         private StreamingCubeSegment segment;
@@ -719,9 +750,9 @@ public class StreamingServer implements ReplicaSetLeaderSelector.LeaderChangeLis
             if (fs.exists(remoteTempPath)) {
                 FileStatus sdst = fs.getFileStatus(remoteTempPath);
                 if (sdst.isDirectory()) {
-                    logger.warn("target temp path:" + remoteTempPath + " is an existed directory, try to delete it.");
+                    logger.warn("target temp path: {} is an existed directory, try to delete it.", remoteTempPath);
                     fs.delete(remoteTempPath, true);
-                    logger.warn("target temp path:" + remoteTempPath + " is deleted.");
+                    logger.warn("target temp path: {} is deleted.", remoteTempPath);
                 }
             }
             fs.copyFromLocalFile(new Path(localPath), remoteTempPath);

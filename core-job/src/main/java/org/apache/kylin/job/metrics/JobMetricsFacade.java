@@ -35,22 +35,19 @@ public class JobMetricsFacade {
         if (!KylinConfig.getInstanceFromEnv().isKylinMetricsReporterForJobEnabled()) {
             return;
         }
-        /**
-         * report job related metrics
-         */
         RecordEvent metricsEvent;
         if (jobStats.throwable == null) {
             metricsEvent = new TimedRecordEvent(KylinConfig.getInstanceFromEnv().getKylinMetricsSubjectJob());
             setJobWrapper(metricsEvent, jobStats.user, jobStats.projectName, jobStats.cubeName, jobStats.jobId,
                     jobStats.jobType, jobStats.cubingType);
             setJobStats(metricsEvent, jobStats.tableSize, jobStats.cubeSize, jobStats.buildDuration,
-                    jobStats.waitResourceTime, jobStats.perBytesTimeCost, //
+                    jobStats.waitResourceTime, jobStats.perBytesTimeCost,
                     jobStats.dColumnDistinct, jobStats.dDictBuilding, jobStats.dCubingInmem, jobStats.dHfileConvert);
         } else {
             metricsEvent = new TimedRecordEvent(KylinConfig.getInstanceFromEnv().getKylinMetricsSubjectJobException());
             setJobExceptionWrapper(metricsEvent, jobStats.user, jobStats.projectName, jobStats.cubeName, jobStats.jobId,
                     jobStats.jobType, jobStats.cubingType, //
-                    jobStats.throwable.getClass());
+                    jobStats.throwable);
         }
         MetricsManager.getInstance().update(metricsEvent);
     }
@@ -81,9 +78,10 @@ public class JobMetricsFacade {
 
     private static <T extends Throwable> void setJobExceptionWrapper(RecordEvent metricsEvent, String user,
             String projectName, String cubeName, String jobId, String jobType, String cubingType,
-            Class<T> throwableClass) {
+            Throwable throwable) {
         setJobWrapper(metricsEvent, user, projectName, cubeName, jobId, jobType, cubingType);
-        metricsEvent.put(JobPropertyEnum.EXCEPTION.toString(), throwableClass.getName());
+        metricsEvent.put(JobPropertyEnum.EXCEPTION.toString(), throwable.getClass().getName());
+        metricsEvent.put(JobPropertyEnum.EXCEPTION_MSG.toString(), throwable.getMessage());
     }
 
     public static class JobStatisticsResult {

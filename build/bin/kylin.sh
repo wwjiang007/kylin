@@ -22,7 +22,7 @@
 
 
 
-source $(cd -P -- "$(dirname -- "$0")" && pwd -P)/header.sh $@
+source ${KYLIN_HOME:-"$(cd -P -- "$(dirname -- "$0")" && pwd -P)/../"}/bin/header.sh $@
 if [ "$verbose" = true ]; then
     shift
 fi
@@ -34,11 +34,23 @@ source ${dir}/set-java-home.sh
 
 function retrieveDependency() {
     #retrive $hive_dependency and $hbase_dependency
-    source ${dir}/find-hive-dependency.sh
-    source ${dir}/find-hbase-dependency.sh
-    source ${dir}/find-hadoop-conf-dir.sh
-    source ${dir}/find-kafka-dependency.sh
-    source ${dir}/find-spark-dependency.sh
+    if [[ -z $reload_dependency && `ls -1 ${dir}/cached-* 2>/dev/null | wc -l` -eq 6 ]]
+    then
+        echo "Using cached dependency..."
+        source ${dir}/cached-hive-dependency.sh
+        source ${dir}/cached-hbase-dependency.sh
+        source ${dir}/cached-hadoop-conf-dir.sh
+        source ${dir}/cached-kafka-dependency.sh
+        source ${dir}/cached-spark-dependency.sh
+        source ${dir}/cached-flink-dependency.sh
+    else
+        source ${dir}/find-hive-dependency.sh
+        source ${dir}/find-hbase-dependency.sh
+        source ${dir}/find-hadoop-conf-dir.sh
+        source ${dir}/find-kafka-dependency.sh
+        source ${dir}/find-spark-dependency.sh
+        source ${dir}/find-flink-dependency.sh
+    fi
 
     #retrive $KYLIN_EXTRA_START_OPTS
     if [ -f "${dir}/setenv.sh" ]; then
@@ -51,7 +63,7 @@ function retrieveDependency() {
     fi
 
     export HBASE_CLASSPATH_PREFIX=${KYLIN_HOME}/conf:${KYLIN_HOME}/lib/*:${KYLIN_HOME}/ext/*:${HBASE_CLASSPATH_PREFIX}
-    export HBASE_CLASSPATH=${HBASE_CLASSPATH}:${hive_dependency}:${kafka_dependency}:${spark_dependency}
+    export HBASE_CLASSPATH=${HBASE_CLASSPATH}:${hive_dependency}:${kafka_dependency}:${spark_dependency}:${flink_dependency}
 
     verbose "HBASE_CLASSPATH: ${HBASE_CLASSPATH}"
 }
@@ -64,6 +76,14 @@ function retrieveStartCommand() {
         then
           quit "Kylin is running, stop it first"
         fi
+    fi
+
+    lockfile=$KYLIN_HOME/LOCK
+    if [ ! -e $lockfile ]; then
+        trap "rm -f $lockfile; exit" INT TERM EXIT
+        touch $lockfile
+    else
+        quit "Kylin is starting, wait for it"
     fi
 
     source ${dir}/check-env.sh
@@ -88,6 +108,12 @@ function retrieveStartCommand() {
     else
         verbose "kylin.security.profile is set to $spring_profile"
     fi
+    # the number of Spring active profiles can be greater than 1. Additional profiles
+    # can be added by setting kylin.security.additional-profiles
+    additional_security_profiles=`bash ${dir}/get-properties.sh kylin.security.additional-profiles`
+    if [[ "x${additional_security_profiles}" != "x" ]]; then
+        spring_profile="${spring_profile},${additional_security_profiles}"
+    fi
 
     retrieveDependency
 
@@ -105,6 +131,11 @@ function retrieveStartCommand() {
     #debug if encounter NoClassDefError
     verbose "kylin classpath is: $(hbase classpath)"
 
+    security_ldap_truststore=`bash ${dir}/get-properties.sh kylin.security.ldap.connection-truststore`
+    if [ -f "${security_ldap_truststore}" ]; then
+        KYLIN_EXTRA_START_OPTS="$KYLIN_EXTRA_START_OPTS -Djavax.net.ssl.trustStore=$security_ldap_truststore"
+    fi
+
     # KYLIN_EXTRA_START_OPTS is for customized settings, checkout bin/setenv.sh
     start_command="hbase ${KYLIN_EXTRA_START_OPTS} \
     -Djava.util.logging.config.file=${tomcat_root}/conf/logging.properties \
@@ -120,17 +151,24 @@ function retrieveStartCommand() {
     -Dkylin.hbase.dependency=${hbase_dependency} \
     -Dkylin.kafka.dependency=${kafka_dependency} \
     -Dkylin.spark.dependency=${spark_dependency} \
+    -Dkylin.flink.dependency=${flink_dependency} \
     -Dkylin.hadoop.conf.dir=${kylin_hadoop_conf_dir} \
     -Dkylin.server.host-address=${kylin_rest_address} \
     -Dspring.profiles.active=${spring_profile} \
     org.apache.hadoop.util.RunJar ${tomcat_root}/bin/bootstrap.jar  org.apache.catalina.startup.Bootstrap start"
 }
 
+if [ "$2" == "--reload-dependency" ]
+then
+    reload_dependency=1
+fi
+
 # start command
 if [ "$1" == "start" ]
 then
     retrieveStartCommand
     ${start_command} >> ${KYLIN_HOME}/logs/kylin.out 2>&1 & echo $! > ${KYLIN_HOME}/pid &
+    rm -f $lockfile
 
     echo ""
     echo "A new Kylin instance is started by $USER. To stop it, run 'kylin.sh stop'"
@@ -143,6 +181,7 @@ elif [ "$1" == "run" ]
 then
     retrieveStartCommand
     ${start_command}
+    rm -f $lockfile
 
 # stop command
 elif [ "$1" == "stop" ]
@@ -197,7 +236,7 @@ elif [ "$1" == "streaming" ]
 then
     if [ $# -lt 2 ]
     then
-        echo "invalid input args $@"
+        echo "Invalid input args $@"
         exit -1
     fi
     if [ "$2" == "start" ]
@@ -207,7 +246,7 @@ then
             PID=`cat $KYLIN_HOME/streaming_receiver_pid`
             if ps -p $PID > /dev/null
             then
-              echo "Kylin is running, stop it first"
+              echo "Kylin streaming receiver is running, stop it first"
             exit 1
             fi
         fi
@@ -234,21 +273,20 @@ then
     then
         if [ ! -f "${KYLIN_HOME}/streaming_receiver_pid" ]
         then
-            echo "streaming is not running, please check"
+            echo "Streaming receiver is not running, please check"
             exit 1
         fi
         PID=`cat ${KYLIN_HOME}/streaming_receiver_pid`
         if [ "$PID" = "" ]
         then
-            echo "streaming is not running, please check"
+            echo "Streaming receiver is not running, please check"
             exit 1
         else
-            echo "stopping streaming:$PID"
+            echo "Stopping streaming receiver: $PID"
             WAIT_TIME=2
             LOOP_COUNTER=20
             if ps -p $PID > /dev/null
             then
-                echo "Stopping Kylin: $PID"
                 kill $PID
 
                 for ((i=0; i<$LOOP_COUNTER; i++))
@@ -277,10 +315,10 @@ then
 
                 # process is killed , remove pid file
                 rm -rf ${KYLIN_HOME}/streaming_receiver_pid
-                echo "Kylin with pid ${PID} has been stopped."
+                echo "Kylin streaming receiver with pid ${PID} has been stopped."
                 exit 0
             else
-               quit "Kylin with pid ${PID} is not running"
+               quit "Kylin streaming receiver with pid ${PID} is not running"
             fi
         fi
     elif [[ "$2" = org.apache.kylin.* ]]
@@ -318,10 +356,14 @@ then
 
     #retrive $KYLIN_EXTRA_START_OPTS from a separate file called setenv-tool.sh
     unset KYLIN_EXTRA_START_OPTS # unset the global server setenv config first
-    if [ -f "${dir}/setenv-tool.sh" ]
-        then source ${dir}/setenv-tool.sh
+    if [ -f "${dir}/setenv-tool.sh" ]; then
+        echo "WARNING: ${dir}/setenv-tool.sh is deprecated and ignored, please remove it and use ${KYLIN_HOME}/conf/setenv-tool.sh instead"
+        source ${dir}/setenv-tool.sh
     fi
 
+    if [ -f "${KYLIN_HOME}/conf/setenv-tool.sh" ]; then
+        source ${KYLIN_HOME}/conf/setenv-tool.sh
+    fi
     hbase_pre_original=${HBASE_CLASSPATH_PREFIX}
     export HBASE_CLASSPATH_PREFIX=${KYLIN_HOME}/tool/*:${HBASE_CLASSPATH_PREFIX}
     exec hbase ${KYLIN_EXTRA_START_OPTS} -Dkylin.hive.dependency=${hive_dependency} -Dkylin.hbase.dependency=${hbase_dependency} -Dlog4j.configuration=file:${KYLIN_HOME}/conf/kylin-tools-log4j.properties "$@"

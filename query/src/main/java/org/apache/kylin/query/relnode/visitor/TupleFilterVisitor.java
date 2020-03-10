@@ -37,6 +37,7 @@ import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.util.NlsString;
+import org.apache.kylin.common.KylinConfig;
 import org.apache.kylin.common.util.DateFormat;
 import org.apache.kylin.common.util.Pair;
 import org.apache.kylin.metadata.filter.CaseTupleFilter;
@@ -51,16 +52,26 @@ import org.apache.kylin.metadata.filter.UnsupportedTupleFilter;
 import org.apache.kylin.metadata.filter.function.Functions;
 import org.apache.kylin.metadata.model.TblColRef;
 import org.apache.kylin.query.relnode.ColumnRowType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.util.GregorianCalendar;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 
 public class TupleFilterVisitor extends RexVisitorImpl<TupleFilter> {
 
+    private static Logger logger = LoggerFactory.getLogger(TupleFilterVisitor.class);
+
     final ColumnRowType inputRowType;
+
+    // is the fact table is a streamingv2 table
+    private boolean autoJustByTimezone = false;
+    private static final long TIME_ZONE_OFFSET = TimeZone.getTimeZone(KylinConfig.getInstanceFromEnv().getStreamingDerivedTimeTimezone())
+            .getRawOffset();
 
     public TupleFilterVisitor(ColumnRowType inputRowType) {
         super(true);
@@ -210,10 +221,18 @@ public class TupleFilterVisitor extends RexVisitorImpl<TupleFilter> {
                 || type.getFamily() == SqlTypeFamily.TIMESTAMP) {
             List<String> newValues = Lists.newArrayList();
             for (Object v : constFilter.getValues()) {
-                if (v == null)
+                if (v == null) {
                     newValues.add(null);
-                else
-                    newValues.add(String.valueOf(DateFormat.stringToMillis(v.toString())));
+                } else {
+                    long ts = DateFormat.stringToMillis(v.toString());
+                    // Change column value of date/timestamp type from local timezone to UTC timezone by minus offset in RelNode level.
+                    // This will change request sent to storage level(receiver), thus affect segment/fragment level purge.
+                    if (autoJustByTimezone && (type.getFamily() == SqlTypeFamily.TIMESTAMP
+                            || type.getFamily() == SqlTypeFamily.DATETIME)) {
+                        ts -= TIME_ZONE_OFFSET;
+                    }
+                    newValues.add(String.valueOf(ts));
+                }
             }
             constFilter = new ConstantTupleFilter(newValues);
         }
@@ -313,5 +332,9 @@ public class TupleFilterVisitor extends RexVisitorImpl<TupleFilter> {
         String name = dynamicParam.getName();
         TupleFilter filter = new DynamicTupleFilter(name);
         return filter;
+    }
+
+    public void setAutoJustByTimezone(boolean autoJustByTimezone) {
+        this.autoJustByTimezone = autoJustByTimezone;
     }
 }

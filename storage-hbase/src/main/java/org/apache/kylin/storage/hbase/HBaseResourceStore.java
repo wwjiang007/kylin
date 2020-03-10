@@ -336,7 +336,10 @@ public class HBaseResourceStore extends PushdownResourceStore {
             if (!ok) {
                 long real = getResourceTimestampImpl(resPath);
                 throw new WriteConflictException(
-                        "Overwriting conflict " + resPath + ", expect old TS " + oldTS + ", but it is " + real);
+                        "Overwriting conflict " + resPath +
+                                ", expect old TS " + oldTS +
+                                ", but it is " + real +
+                                ", the expected new TS: " + newTS);
             }
 
             return newTS;
@@ -411,7 +414,11 @@ public class HBaseResourceStore extends PushdownResourceStore {
                 if (hdfsResourceExist) { // remove hdfs cell value
                     deletePushdown(resPath);
                 }
+            } else {
+                throw new IOException("Resource " + resPath + " timestamp not match, [originLastModified: "
+                        + origLastModified + ", timestampToDelete: " + timestamp + "]");
             }
+
         } finally {
             IOUtils.closeQuietly(table);
         }

@@ -136,12 +136,7 @@ public class ModelService extends BasicService {
             throw new BadRequestException(String.format(Locale.ROOT, msg.getDUPLICATE_MODEL_NAME(), desc.getName()));
         }
 
-        String factTableName = desc.getRootFactTableName();
-        TableDesc tableDesc = getTableManager().getTableDesc(factTableName, projectName);
-        if (tableDesc.getSourceType() == ISourceAware.ID_STREAMING
-                && (desc.getPartitionDesc() == null || desc.getPartitionDesc().getPartitionDateColumn() == null)) {
-            throw new IllegalArgumentException("Must define a partition column.");
-        }
+        validateModel(projectName, desc);
 
         DataModelDesc createdDesc = null;
         String owner = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -151,8 +146,18 @@ public class ModelService extends BasicService {
 
     public DataModelDesc updateModelAndDesc(String project, DataModelDesc desc) throws IOException {
         aclEvaluate.checkProjectWritePermission(project);
+        validateModel(project, desc);
         getDataModelManager().updateDataModelDesc(desc);
         return desc;
+    }
+
+    public void validateModel(String project, DataModelDesc desc) throws IllegalArgumentException {
+        String factTableName = desc.getRootFactTableName();
+        TableDesc tableDesc = getTableManager().getTableDesc(factTableName, project);
+        if ((tableDesc.getSourceType() == ISourceAware.ID_STREAMING || tableDesc.isStreamingTable())
+                && (desc.getPartitionDesc() == null || desc.getPartitionDesc().getPartitionDateColumn() == null)) {
+            throw new IllegalArgumentException("Must define a partition column.");
+        }
     }
 
     public void dropModel(DataModelDesc desc) throws IOException {
@@ -286,8 +291,7 @@ public class ModelService extends BasicService {
 
         StringBuilder checkRet = new StringBuilder();
         if (cubes != null && cubes.size() != 0 && !historyModels.isEmpty()) {
-            dataModelDesc.init(getConfig(), getTableManager().getAllTablesMap(project),
-                    getDataModelManager().getModels(project), false);
+            dataModelDesc.init(getConfig(), getTableManager().getAllTablesMap(project));
 
             List<String> curModelDims = getModelCols(dataModelDesc);
             List<String> curModelMeasures = getModelMeasures(dataModelDesc);

@@ -28,9 +28,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.kylin.common.KylinConfig;
+import org.apache.kylin.common.lock.DistributedLock;
 import org.apache.kylin.common.persistence.RootPersistentEntity;
 import org.apache.kylin.common.util.CliCommandExecutor;
 import org.apache.kylin.common.util.HadoopUtil;
@@ -46,6 +48,7 @@ import org.apache.kylin.cube.model.CubeDesc;
 import org.apache.kylin.engine.EngineFactory;
 import org.apache.kylin.engine.mr.CubingJob;
 import org.apache.kylin.engine.mr.JobBuilderSupport;
+import org.apache.kylin.engine.mr.common.CubeJobLockUtil;
 import org.apache.kylin.engine.mr.common.CuboidRecommenderUtil;
 import org.apache.kylin.job.JobInstance;
 import org.apache.kylin.job.common.PatternedLogger;
@@ -63,12 +66,14 @@ import org.apache.kylin.metadata.model.IStorageAware;
 import org.apache.kylin.metadata.model.MeasureDesc;
 import org.apache.kylin.metadata.model.SegmentRange;
 import org.apache.kylin.metadata.model.SegmentStatusEnum;
+import org.apache.kylin.metadata.model.Segments;
 import org.apache.kylin.metadata.model.TableDesc;
 import org.apache.kylin.metadata.project.ProjectInstance;
 import org.apache.kylin.metadata.project.ProjectManager;
 import org.apache.kylin.metadata.project.RealizationEntry;
 import org.apache.kylin.metadata.realization.RealizationStatusEnum;
 import org.apache.kylin.metadata.realization.RealizationType;
+import org.apache.kylin.metrics.MetricsManager;
 import org.apache.kylin.metrics.property.QueryCubePropertyEnum;
 import org.apache.kylin.rest.constant.Constant;
 import org.apache.kylin.rest.exception.BadRequestException;
@@ -77,6 +82,7 @@ import org.apache.kylin.rest.exception.InternalErrorException;
 import org.apache.kylin.rest.msg.Message;
 import org.apache.kylin.rest.msg.MsgPicker;
 import org.apache.kylin.rest.request.MetricsRequest;
+import org.apache.kylin.rest.request.PrepareSqlRequest;
 import org.apache.kylin.rest.response.CubeInstanceResponse;
 import org.apache.kylin.rest.response.CuboidTreeResponse;
 import org.apache.kylin.rest.response.CuboidTreeResponse.NodeInfo;
@@ -423,7 +429,21 @@ public class CubeService extends BasicService implements InitializingBean {
             cubeStatusUpdated = true;
             // for streaming cube.
             if (isStreamingCube) {
+                //drop not ready segments
+                CubeSegment[] buildingSegments = new CubeSegment[cubeInstance.getBuildingSegments().size()];
+                Segments segments = cubeInstance.getBuildingSegments();
+                if (!CollectionUtils.isEmpty(segments)) {
+                    for (int i = 0; i < segments.size(); i++) {
+                        buildingSegments[i] = (CubeSegment) segments.get(i);
+                    }
+                    getCubeManager().dropOptmizingSegments(cubeInstance, buildingSegments);
+                }
+                //unAssign cube
                 getStreamingCoordinator().unAssignCube(cubeName);
+
+                //discard jobs
+                releaseAllJobs(cubeInstance);
+
             }
             return cubeInstance;
         } catch (Exception e) {
@@ -532,7 +552,8 @@ public class CubeService extends BasicService implements InitializingBean {
 
         hr = new HBaseResponse();
         CubeInstance cube = CubeManager.getInstance(getConfig()).getCube(cubeName);
-        if (cube.getStorageType() == IStorageAware.ID_HBASE || cube.getStorageType() == IStorageAware.ID_SHARDED_HBASE || cube.getStorageType() == IStorageAware.ID_REALTIME_AND_HBASE) {
+        if (cube.getStorageType() == IStorageAware.ID_HBASE || cube.getStorageType() == IStorageAware.ID_SHARDED_HBASE
+                || cube.getStorageType() == IStorageAware.ID_REALTIME_AND_HBASE) {
             try {
                 logger.debug("Loading HTable info " + cubeName + ", " + tableName);
 
@@ -574,6 +595,11 @@ public class CubeService extends BasicService implements InitializingBean {
     public CubeInstance deleteSegment(CubeInstance cube, String segmentName) throws IOException {
         aclEvaluate.checkProjectOperationPermission(cube);
         Message msg = MsgPicker.getMsg();
+
+        if (cube.getStatus() == RealizationStatusEnum.READY) {
+            throw new BadRequestException(
+                    String.format(Locale.ROOT, msg.getDELETE_SEG_FROM_READY_CUBE(), segmentName, cube.getName()));
+        }
 
         CubeSegment toDelete = null;
         for (CubeSegment seg : cube.getSegments()) {
@@ -621,7 +647,8 @@ public class CubeService extends BasicService implements InitializingBean {
             List<String> toDelHDFSPaths = Lists.newArrayListWithCapacity(toRemoveSegs.size());
             for (CubeSegment seg : toRemoveSegs) {
                 toDropHTables.add(seg.getStorageLocationIdentifier());
-                toDelHDFSPaths.add(JobBuilderSupport.getJobWorkingDir(seg.getConfig().getHdfsWorkingDirectory(), seg.getLastBuildJobID()));
+                toDelHDFSPaths.add(JobBuilderSupport.getJobWorkingDir(seg.getConfig().getHdfsWorkingDirectory(),
+                        seg.getLastBuildJobID()));
             }
 
             StorageCleanUtil.dropHTables(new HBaseAdmin(HBaseConnection.getCurrentHBaseConfiguration()), toDropHTables);
@@ -649,6 +676,22 @@ public class CubeService extends BasicService implements InitializingBean {
             final ExecutableState status = cubingJob.getStatus();
             if (status != ExecutableState.SUCCEED && status != ExecutableState.DISCARDED) {
                 getExecutableManager().discardJob(cubingJob.getId());
+
+                //release global dict lock if exists
+                DistributedLock lock = KylinConfig.getInstanceFromEnv().getDistributedLockFactory()
+                        .lockForCurrentThread();
+                if (lock.isLocked(CubeJobLockUtil.getLockPath(cube.getName(), cubingJob.getId()))) {//release cube job dict lock if exists
+                    lock.purgeLocks(CubeJobLockUtil.getLockPath(cube.getName(), null));
+                    logger.info("{} unlock cube job global lock path({}) success", cubingJob.getId(),
+                            CubeJobLockUtil.getLockPath(cube.getName(), null));
+
+                    if (lock.isLocked(CubeJobLockUtil.getEphemeralLockPath(cube.getName()))) {//release cube job Ephemeral lock if exists
+                        lock.purgeLocks(CubeJobLockUtil.getEphemeralLockPath(cube.getName()));
+                        logger.info("{} unlock cube job ephemeral lock path({}) success", cubingJob.getId(),
+                                CubeJobLockUtil.getEphemeralLockPath(cube.getName()));
+                    }
+                }
+
             }
         }
     }
@@ -720,27 +763,51 @@ public class CubeService extends BasicService implements InitializingBean {
         }
     }
 
-    private void mergeCubeSegment(String cubeName) {
+    public String mergeCubeSegment(String cubeName) {
         CubeInstance cube = getCubeManager().getCube(cubeName);
         if (!cube.needAutoMerge())
-            return;
+            return null;
+
+        if (!cube.isReady()) {
+            logger.info("The cube: {} is disabled", cubeName);
+            return null;
+        }
 
         synchronized (CubeService.class) {
             try {
                 cube = getCubeManager().getCube(cubeName);
                 SegmentRange offsets = cube.autoMergeCubeSegments();
-                if (offsets != null) {
+                if (offsets != null && !isMergingJobBeenDiscarded(cube, cubeName, cube.getProject(), offsets)) {
                     CubeSegment newSeg = getCubeManager().mergeSegments(cube, null, offsets, true);
-                    logger.debug("Will submit merge job on " + newSeg);
+                    logger.info("Will submit merge job on " + newSeg);
                     DefaultChainedExecutable job = EngineFactory.createBatchMergeJob(newSeg, "SYSTEM");
                     getExecutableManager().addJob(job);
+                    return job.getId();
                 } else {
-                    logger.debug("Not ready for merge on cube " + cubeName);
+                    logger.info("Not ready for merge on cube " + cubeName);
                 }
             } catch (IOException e) {
                 logger.error("Failed to auto merge cube " + cubeName, e);
             }
         }
+        return null;
+    }
+
+    //Don't merge the job that has been discarded manually before
+    private boolean isMergingJobBeenDiscarded(CubeInstance cubeInstance, String cubeName, String projectName,
+            SegmentRange offsets) {
+        SegmentRange.TSRange tsRange = new SegmentRange.TSRange((Long) offsets.start.v, (Long) offsets.end.v);
+        String segmentName = CubeSegment.makeSegmentName(tsRange, null, cubeInstance.getModel());
+        final List<CubingJob> jobInstanceList = jobService.listJobsByRealizationName(cubeName, projectName,
+                EnumSet.of(ExecutableState.DISCARDED));
+        for (CubingJob cubingJob : jobInstanceList) {
+            if (cubingJob.getSegmentName().equals(segmentName)) {
+                logger.debug("Merge job {} has been discarded before, will not merge.", segmentName);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void validateCubeDesc(CubeDesc desc, boolean isDraft) {
@@ -896,24 +963,6 @@ public class CubeService extends BasicService implements InitializingBean {
         Broadcaster.getInstance(getConfig()).registerStaticListener(new HTableInfoSyncListener(), "cube");
     }
 
-    private class HTableInfoSyncListener extends Broadcaster.Listener {
-        @Override
-        public void onClearAll(Broadcaster broadcaster) throws IOException {
-            htableInfoCache.invalidateAll();
-        }
-
-        @Override
-        public void onEntityChange(Broadcaster broadcaster, String entity, Broadcaster.Event event, String cacheKey)
-                throws IOException {
-            String cubeName = cacheKey;
-            String keyPrefix = cubeName + "/";
-            for (String k : htableInfoCache.asMap().keySet()) {
-                if (k.startsWith(keyPrefix))
-                    htableInfoCache.invalidate(k);
-            }
-        }
-    }
-
     public CubeInstanceResponse createCubeInstanceResponse(CubeInstance cube) {
         return new CubeInstanceResponse(cube, projectService.getProjectOfCube(cube.getName()));
     }
@@ -960,7 +1009,7 @@ public class CubeService extends BasicService implements InitializingBean {
         long queryExactlyMatchCount = queryMatchMap == null || queryMatchMap.get(cuboidId) == null ? 0L
                 : queryMatchMap.get(cuboidId);
         boolean ifExist = currentCuboidSet.contains(cuboidId);
-        long rowCount = rowCountMap == null ? 0L : rowCountMap.get(cuboidId);
+        long rowCount = (rowCountMap == null || rowCountMap.size() == 0) ? 0L : rowCountMap.get(cuboidId);
 
         NodeInfo node = new NodeInfo();
         node.setId(cuboidId);
@@ -1009,9 +1058,10 @@ public class CubeService extends BasicService implements InitializingBean {
         String table = getMetricsManager().getSystemTableFromSubject(getConfig().getKylinMetricsSubjectQueryCube());
         String sql = "select " + cuboidColumn + ", sum(" + hitMeasure + ")" //
                 + " from " + table//
-                + " where " + QueryCubePropertyEnum.CUBE.toString() + " = '" + cubeName + "'" //
+                + " where " + QueryCubePropertyEnum.CUBE.toString() + " = ?" //
                 + " group by " + cuboidColumn;
-        List<List<String>> orgHitFrequency = queryService.querySystemCube(sql).getResults();
+
+        List<List<String>> orgHitFrequency = getPrepareQueryResult(cubeName, sql);
         return formatQueryCount(orgHitFrequency);
     }
 
@@ -1023,9 +1073,10 @@ public class CubeService extends BasicService implements InitializingBean {
         String table = getMetricsManager().getSystemTableFromSubject(getConfig().getKylinMetricsSubjectQueryCube());
         String sql = "select " + cuboidSource + ", " + cuboidTgt + ", avg(" + aggCount + "), avg(" + returnCount + ")"//
                 + " from " + table //
-                + " where " + QueryCubePropertyEnum.CUBE.toString() + " = '" + cubeName + "' " //
+                + " where " + QueryCubePropertyEnum.CUBE.toString() + " = ?" //
                 + " group by " + cuboidSource + ", " + cuboidTgt;
-        List<List<String>> orgRollingUpCount = queryService.querySystemCube(sql).getResults();
+
+        List<List<String>> orgRollingUpCount = getPrepareQueryResult(cubeName, sql);
         return formatRollingUpStats(orgRollingUpCount);
     }
 
@@ -1035,11 +1086,25 @@ public class CubeService extends BasicService implements InitializingBean {
         String table = getMetricsManager().getSystemTableFromSubject(getConfig().getKylinMetricsSubjectQueryCube());
         String sql = "select " + cuboidSource + ", sum(" + hitMeasure + ")" //
                 + " from " + table //
-                + " where " + QueryCubePropertyEnum.CUBE.toString() + " = '" + cubeName + "'" //
+                + " where " + QueryCubePropertyEnum.CUBE.toString() + " = ?" //
                 + " and " + QueryCubePropertyEnum.IF_MATCH.toString() + " = true" //
                 + " group by " + cuboidSource;
-        List<List<String>> orgMatchHitFrequency = queryService.querySystemCube(sql).getResults();
+
+        List<List<String>> orgMatchHitFrequency = getPrepareQueryResult(cubeName, sql);
         return formatQueryCount(orgMatchHitFrequency);
+    }
+
+    private List<List<String>> getPrepareQueryResult(String cubeName, String sql) {
+        PrepareSqlRequest sqlRequest = new PrepareSqlRequest();
+        sqlRequest.setProject(MetricsManager.SYSTEM_PROJECT);
+        PrepareSqlRequest.StateParam[] params = new PrepareSqlRequest.StateParam[1];
+        params[0] = new PrepareSqlRequest.StateParam();
+        params[0].setClassName("java.lang.String");
+        params[0].setValue(cubeName);
+        sqlRequest.setParams(params);
+        sqlRequest.setSql(sql);
+
+        return queryService.doQueryWithCache(sqlRequest, false).getResults();
     }
 
     @PreAuthorize(Constant.ACCESS_HAS_ROLE_ADMIN
@@ -1077,6 +1142,24 @@ public class CubeService extends BasicService implements InitializingBean {
             exec.execute(cmd, patternedLogger);
         } catch (IOException e) {
             throw new InternalErrorException("Failed to perform one-click migrating", e);
+        }
+    }
+
+    private class HTableInfoSyncListener extends Broadcaster.Listener {
+        @Override
+        public void onClearAll(Broadcaster broadcaster) throws IOException {
+            htableInfoCache.invalidateAll();
+        }
+
+        @Override
+        public void onEntityChange(Broadcaster broadcaster, String entity, Broadcaster.Event event, String cacheKey)
+                throws IOException {
+            String cubeName = cacheKey;
+            String keyPrefix = cubeName + "/";
+            for (String k : htableInfoCache.asMap().keySet()) {
+                if (k.startsWith(keyPrefix))
+                    htableInfoCache.invalidate(k);
+            }
         }
     }
 }

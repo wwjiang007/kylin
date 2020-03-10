@@ -73,7 +73,7 @@ import org.slf4j.LoggerFactory;
 import scala.Tuple2;
 
 /**
- * Spark application to build cube with the "by-layer" algorithm. Only support source data from Hive; Metadata in HBase.
+ * Spark application to build cube with the "by-layer" algorithm.
  */
 public class SparkCubingByLayer extends AbstractApplication implements Serializable {
 
@@ -197,13 +197,13 @@ public class SparkCubingByLayer extends AbstractApplication implements Serializa
 
             allRDDs[level] = allRDDs[level - 1].flatMapToPair(flatMapFunction).reduceByKey(reducerFunction2, partition)
                     .persist(storageLevel);
-            allRDDs[level - 1].unpersist();
+            allRDDs[level - 1].unpersist(false);
             if (envConfig.isSparkSanityCheckEnabled() == true) {
                 sanityCheck(allRDDs[level], totalCount, level, cubeStatsReader, countMeasureIndex);
             }
             saveToHDFS(allRDDs[level], metaUrl, cubeName, cubeSegment, outputPath, level, job, envConfig);
         }
-        allRDDs[totalLevels].unpersist();
+        allRDDs[totalLevels].unpersist(false);
         logger.info("Finished on calculating all level cuboids.");
         logger.info("HDFS: Number of bytes written=" + jobListener.metrics.getBytesWritten());
         //HadoopUtil.deleteHDFSMeta(metaUrl);

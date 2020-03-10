@@ -55,7 +55,7 @@ public class BeelineHiveClient implements IHiveClient {
         }
         String[] splits = StringUtils.split(beelineParams);
         String url = "", username = "", password = "";
-        for (int i = 0; i < splits.length; i++) {
+        for (int i = 0; i < splits.length - 1; i++) {
             if ("-u".equals(splits[i])) {
                 url = stripQuotes(splits[i + 1]);
             }
@@ -70,8 +70,13 @@ public class BeelineHiveClient implements IHiveClient {
                 BufferedReader br = null;
                 try {
                     br = new BufferedReader(new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8));
-                    password = br.readLine();
-                    br.close();
+                    try {
+                        password = br.readLine();
+                    } finally {
+                        if (null != br) {
+                            br.close();
+                        }
+                    }
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }

@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.apache.calcite.DataContext;
@@ -156,6 +157,7 @@ public class OLAPContext {
     public TupleFilter havingFilter;
     public List<JoinDesc> joins = new LinkedList<>();
     public JoinsTree joinsTree;
+    public boolean isBorrowedContext = false; // Whether preparedContext is borrowed from cache
     List<TblColRef> sortColumns;
     List<SQLDigest.OrderEnum> sortOrders;
 
@@ -199,7 +201,7 @@ public class OLAPContext {
                     metricsColumns, aggregations, aggrSqlCalls, dynFuncs, // aggregation
                     rtDimColumns, rtMetricColumns, // runtime related columns
                     filterColumns, filter, havingFilter, // filter
-                    sortColumns, sortOrders, limitPrecedesAggr, hasLimit, // sort & limit
+                    sortColumns, sortOrders, limitPrecedesAggr, hasLimit, isBorrowedContext, // sort & limit
                     involvedMeasure);
         }
         return sqlDigest;
@@ -317,14 +319,26 @@ public class OLAPContext {
                 Object value = dataContext.get(variable);
                 if (value != null) {
                     String str = value.toString();
-                    if (compFilter.getColumn().getType().isDateTimeFamily())
-                        str = String.valueOf(DateFormat.stringToMillis(str));
+                    str = transferDateTimeColumnToMillis(compFilter, str);
                     compFilter.clearPreviousVariableValues(variable);
                     compFilter.bindVariable(variable, str);
                 }
 
             }
         }
+    }
+
+    private String transferDateTimeColumnToMillis(CompareTupleFilter compFilter, String value) {
+        TblColRef column = compFilter.getColumn();
+        // To fix KYLIN-4157, when using PrepareStatement query, functions within WHERE will cause InternalErrorException
+        if (Objects.isNull(column)){
+            return value;
+        }
+
+        if (column.getType().isDateTimeFamily()){
+            value = String.valueOf(DateFormat.stringToMillis(value));
+        }
+        return value;
     }
     // ============================================================================
 

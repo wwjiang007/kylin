@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 
-source $(cd -P -- "$(dirname -- "$0")" && pwd -P)/header.sh
+source ${KYLIN_HOME:-"$(cd -P -- "$(dirname -- "$0")" && pwd -P)/../"}/bin/header.sh
 
 echo Retrieving Spark dependency...
 
@@ -48,4 +48,5 @@ else
     verbose "spark dependency: $spark_dependency"
     export spark_dependency
 fi
+echo "export spark_dependency=$spark_dependency" > ${dir}/cached-spark-dependency.sh
 

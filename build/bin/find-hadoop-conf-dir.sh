@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 
-source $(cd -P -- "$(dirname -- "$0")" && pwd -P)/header.sh
+source ${KYLIN_HOME:-"$(cd -P -- "$(dirname -- "$0")" && pwd -P)/../"}/bin/header.sh
 
 echo Retrieving hadoop conf dir...
 
@@ -77,3 +77,4 @@ function find_hadoop_conf_dir() {
     done
 }
 find_hadoop_conf_dir
+echo "export kylin_hadoop_conf_dir=$kylin_hadoop_conf_dir" > ${dir}/cached-hadoop-conf-dir.sh

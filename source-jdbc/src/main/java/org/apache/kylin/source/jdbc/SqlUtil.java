@@ -62,6 +62,7 @@ public class SqlUtil {
     }
 
     public static final int tryTimes = 5;
+    public static final String DRIVER_MISS = "DRIVER_MISS";
 
     public static Connection getConnection(DBConnConf dbconf) {
         if (dbconf.getUrl() == null)
@@ -70,7 +71,8 @@ public class SqlUtil {
         try {
             Class.forName(dbconf.getDriver());
         } catch (Exception e) {
-            logger.error("", e);
+            logger.error("Miss Driver", e);
+            throw new IllegalStateException(DRIVER_MISS);
         }
         boolean got = false;
         int times = 0;
@@ -83,7 +85,7 @@ public class SqlUtil {
                 logger.warn("while use:" + dbconf, e);
                 try {
                     int rt = r.nextInt(10);
-                    Thread.sleep(rt * 1000);
+                    Thread.sleep(rt * 1000L);
                 } catch (InterruptedException e1) {
                     Thread.interrupted();
                 }

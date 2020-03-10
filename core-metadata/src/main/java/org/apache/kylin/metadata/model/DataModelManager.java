@@ -26,6 +26,7 @@ import java.util.Map;
 import org.apache.kylin.common.KylinConfig;
 import org.apache.kylin.common.persistence.ResourceStore;
 import org.apache.kylin.common.persistence.Serializer;
+import org.apache.kylin.common.persistence.WriteConflictException;
 import org.apache.kylin.common.util.AutoReadWriteLock;
 import org.apache.kylin.common.util.AutoReadWriteLock.AutoLock;
 import org.apache.kylin.common.util.ClassUtil;
@@ -86,9 +87,11 @@ public class DataModelManager {
                 getDataModelImplClass(), dataModelDescMap) {
             @Override
             protected DataModelDesc initEntityAfterReload(DataModelDesc model, String resourceName) {
-                String prj = ProjectManager.getInstance(config).getProjectOfModel(model.getName()).getName();
+                String prj = (null == model.getProjectName()
+                        ? ProjectManager.getInstance(config).getProjectOfModel(model.getName()).getName()
+                        : model.getProjectName());
                 if (!model.isDraft()) {
-                    model.init(config, getAllTablesMap(prj), getModels(prj), true);
+                    model.init(config, getAllTablesMap(prj));
                 }
                 return model;
             }
@@ -106,7 +109,7 @@ public class DataModelManager {
         public void onProjectSchemaChange(Broadcaster broadcaster, String project) throws IOException {
             //clean up the current project's table desc
             TableMetadataManager.getInstance(config).resetProjectSpecificTableDesc(project);
-
+            logger.info("Update models in project: " + project);
             try (AutoLock lock = modelMapLock.lockForWrite()) {
                 for (String model : ProjectManager.getInstance(config).getProject(project).getModels()) {
                     crud.reloadQuietly(model);
@@ -128,6 +131,10 @@ public class DataModelManager {
                 broadcaster.notifyProjectSchemaUpdate(prj.getName());
             }
         }
+    }
+
+    public List<String> getErrorModels() {
+        return crud.getLoadFailedEntities();
     }
 
     private Class<DataModelDesc> getDataModelImplClass() {
@@ -236,24 +243,21 @@ public class DataModelManager {
 
             ProjectManager prjMgr = ProjectManager.getInstance(config);
             ProjectInstance prj = prjMgr.getProject(projectName);
-            if (prj.containsModel(name))
+            if (prj.containsModel(name)) {
                 throw new IllegalStateException("project " + projectName + " already contains model " + name);
-
-            try {
-                // Temporarily register model under project, because we want to 
-                // update project formally after model is saved.
-                prj.getModels().add(name);
-
-                desc.setOwner(owner);
-                logger.info("Saving Model {} to Project {} with {} as owner", desc.getName(), projectName, owner);
-                desc = saveDataModelDesc(desc);
-
-            } finally {
-                prj.getModels().remove(name);
             }
+            desc.setOwner(owner);
+            logger.info("Saving Model {} to Project {} with {} as owner", desc.getName(), projectName, owner);
+            desc = saveDataModelDesc(desc, projectName);
 
             // now that model is saved, update project formally
-            prjMgr.addModelToProject(name, projectName);
+            try {
+                prjMgr.addModelToProject(name, projectName);
+            } catch (WriteConflictException e) {
+                logger.warn("Add model: {} to project: {} failed for write conflicts, rollback", name, projectName, e);
+                crud.delete(desc);
+                throw e;
+            }
 
             return desc;
         }
@@ -266,16 +270,14 @@ public class DataModelManager {
                 throw new IllegalArgumentException("DataModelDesc '" + name + "' does not exist.");
             }
 
-            return saveDataModelDesc(desc);
+            return saveDataModelDesc(desc, ProjectManager.getInstance(config).getProjectOfModel(desc.getName()).getName());
         }
     }
 
-    private DataModelDesc saveDataModelDesc(DataModelDesc dataModelDesc) throws IOException {
-
-        String prj = ProjectManager.getInstance(config).getProjectOfModel(dataModelDesc.getName()).getName();
+    private DataModelDesc saveDataModelDesc(DataModelDesc dataModelDesc, String projectName) throws IOException {
 
         if (!dataModelDesc.isDraft())
-            dataModelDesc.init(config, this.getAllTablesMap(prj), getModels(prj), false);
+            dataModelDesc.init(config, this.getAllTablesMap(projectName));
 
         crud.save(dataModelDesc);
 

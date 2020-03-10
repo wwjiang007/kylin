@@ -31,7 +31,7 @@
   <groupId>org.apache.kylin</groupId>
   <artifactId>kylin</artifactId>
   <packaging>pom</packaging>
-  <version>3.0.0-SNAPSHOT</version>
+  <version>3.1.0-SNAPSHOT</version>
 
   <name>Apache Kylin</name>
   <url>http://kylin.apache.org</url>
@@ -60,7 +60,7 @@
     <eclipse.lifecycle-mapping.version>1.0.1</eclipse.lifecycle-mapping.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-    <puppycrawl.version>8.6</puppycrawl.version>
+    <puppycrawl.version>8.18</puppycrawl.version>
     <spotbugs.version>3.1.1</spotbugs.version>
 
     <kylin.version>3.0.0</kylin.version>
@@ -83,6 +83,9 @@
     <spark.version>2.3.2</spark.version>
     <kryo.version>4.0.0</kryo.version>
 
+    <!-- Flink versions -->
+    <flink.version>1.9.0</flink.version>
+
     <!-- mysql versions -->
     <mysql-connector.version>5.1.8</mysql-connector.version>
 
@@ -92,8 +95,8 @@
     <reflections.version>0.9.10</reflections.version>
 
     <!-- Calcite Version, the kylin fork is: https://github.com/Kyligence/calcite -->
-    <calcite.version>1.16.0-kylin-r2</calcite.version>
-    <avatica.version>1.10.0</avatica.version>
+    <calcite.version>1.16.0-kylin-r3</calcite.version>
+    <avatica.version>1.12.0</avatica.version>
 
     <!-- Hadoop Common deps, keep compatible with hadoop2.version -->
     <zookeeper.version>3.4.13</zookeeper.version>
@@ -123,6 +126,7 @@
     <mockito.version>2.7.14</mockito.version>
     <mockito-all.version>1.9.5</mockito-all.version>
     <powermock.version>1.7.0</powermock.version>
+    <guava-testlib.version>28.2-jre</guava-testlib.version>
 
     <!-- Commons -->
     <commons-lang3.version>3.4</commons-lang3.version>
@@ -143,7 +147,7 @@
     <cglib.version>3.2.4</cglib.version>
     <supercsv.version>2.4.0</supercsv.version>
     <cors.version>2.5</cors.version>
-    <tomcat.version>7.0.91</tomcat.version>
+    <tomcat.version>7.0.100</tomcat.version>
     <t-digest.version>3.1</t-digest.version>
     <freemarker.version>2.3.23</freemarker.version>
     <rocksdb.version>5.9.2</rocksdb.version>
@@ -162,7 +166,7 @@
     <forbiddenapis.version>2.3</forbiddenapis.version>
 
     <!-- Sonar -->
-    <jacoco.version>0.8.0</jacoco.version>
+    <jacoco.version>0.8.2</jacoco.version>
     <sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
     <sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
     <sonar.jacoco.reportPaths>${project.basedir}/../target/jacoco.exec</sonar.jacoco.reportPaths>
@@ -298,6 +302,11 @@
       <dependency>
         <groupId>org.apache.kylin</groupId>
         <artifactId>kylin-engine-spark</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.kylin</groupId>
+        <artifactId>kylin-engine-flink</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -742,6 +751,24 @@
         <version>${kryo.version}</version>
         <scope>provided</scope>
       </dependency>
+      <!-- Flink dependency -->
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-java</artifactId>
+        <version>${flink.version}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-scala_2.11</artifactId>
+        <version>${flink.version}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-hadoop-compatibility_2.11</artifactId>
+        <version>${flink.version}</version>
+      </dependency>
       <!-- Kafka dependency -->
       <dependency>
         <groupId>org.apache.kafka</groupId>
@@ -969,6 +996,11 @@
         <artifactId>spring-security-saml2-core</artifactId>
         <version>${spring.framework.security.extensions.version}</version>
       </dependency>
+      <dependency>
+        <groupId>org.springframework.security</groupId>
+        <artifactId>spring-security-cas</artifactId>
+        <version>${spring.framework.security.version}</version>
+      </dependency>
 
       <dependency>
         <groupId>org.eclipse.jetty</groupId>
@@ -1070,7 +1102,7 @@
     <repository>
       <id>central</id>
       <name>Central Repository</name>
-      <url>http://repo.maven.apache.org/maven2</url>
+      <url>https://repo.maven.apache.org/maven2</url>
       <layout>default</layout>
       <snapshots>
         <enabled>false</enabled>
@@ -1079,7 +1111,7 @@
 
     <repository>
       <id>conjars</id>
-      <url>http://conjars.org/repo/</url>
+      <url>https://conjars.org/repo/</url>
     </repository>
 
     <repository>
@@ -1095,7 +1127,7 @@
     <repository>
       <id>kyligence</id>
       <name>Kyligence Repository</name>
-      <url>http://repository.kyligence.io:8081/repository/maven-public/
+      <url>https://repository.kyligence.io/repository/maven-public/
       </url>
       <releases>
         <enabled>true</enabled>
@@ -1297,7 +1329,7 @@
         <groupId>net.alchim31.maven</groupId>
         <artifactId>scala-maven-plugin</artifactId>
         <!-- uncomment this on release -->
-        <!--<version>3.4.1</version>-->
+        <version>3.4.1</version>
       </plugin>
     </plugins>
   </build>
@@ -1334,6 +1366,7 @@
     <module>stream-coordinator</module>
     <module>stream-core</module>
     <module>stream-source-kafka</module>
+    <module>engine-flink</module>
   </modules>
 
   <reporting>
@@ -1669,6 +1702,9 @@
             <groupId>org.apache.rat</groupId>
             <artifactId>apache-rat-plugin</artifactId>
             <configuration>
+              <!-- Used to print file with unapproved licenses in project to stand output -->
+              <consoleOutput>true</consoleOutput>
+
               <!-- Exclude files/folders for apache release -->
               <excludes>
                 <exclude>DEPENDENCIES</exclude>

@@ -97,6 +97,7 @@ import org.apache.kylin.metrics.MetricsManager;
 import org.apache.kylin.query.QueryConnection;
 import org.apache.kylin.query.relnode.OLAPContext;
 import org.apache.kylin.query.util.PushDownUtil;
+import org.apache.kylin.query.util.QueryInfoCollector;
 import org.apache.kylin.query.util.QueryUtil;
 import org.apache.kylin.query.util.TempStatementUtil;
 import org.apache.kylin.rest.constant.Constant;
@@ -157,6 +158,10 @@ public class QueryService extends BasicService {
     private ModelService modelService;
 
     @Autowired
+    @Qualifier("TableAclService")
+    private TableACLService tableAclService;
+
+    @Autowired
     private AclEvaluate aclEvaluate;
 
     private GenericKeyedObjectPool<PreparedContextKey, PreparedContext> preparedContextPool;
@@ -175,6 +180,7 @@ public class QueryService extends BasicService {
         config.setMaxTotal(kylinConfig.getQueryMaxCacheStatementNum());
         config.setBlockWhenExhausted(false);
         config.setMinEvictableIdleTimeMillis(10 * 60 * 1000L); // cached statement will be evict if idle for 10 minutes
+        config.setTimeBetweenEvictionRunsMillis(60 * 1000L); 
         GenericKeyedObjectPool<PreparedContextKey, PreparedContext> pool = new GenericKeyedObjectPool<>(factory,
                 config);
         return pool;
@@ -194,6 +200,10 @@ public class QueryService extends BasicService {
     @PostConstruct
     public void init() throws IOException {
         Preconditions.checkNotNull(cacheManager, "cacheManager is not injected yet");
+    }
+
+    public List<TableMeta> getMetadataFilterByUser(String project) throws SQLException, IOException {
+        return tableAclService.filterTableMetasByAcl(getMetadata(project), project);
     }
 
     public List<TableMeta> getMetadata(String project) throws SQLException {
@@ -446,6 +456,7 @@ public class QueryService extends BasicService {
         } finally {
             BackdoorToggles.cleanToggles();
             QueryContextFacade.resetCurrent();
+            QueryInfoCollector.reset();
         }
     }
 
@@ -686,6 +697,13 @@ public class QueryService extends BasicService {
             DBUtils.closeQuietly(conn);
             if (preparedContext != null) {
                 if (borrowPrepareContext) {
+                    // Set tag isBorrowedContext true, when return preparedContext back
+                    for (OLAPContext olapContext : preparedContext.olapContexts) {
+                        if (borrowPrepareContext) {
+                            olapContext.isBorrowedContext = true;
+                        }
+                    }
+
                     preparedContextPool.returnObject(preparedContextKey, preparedContext);
                 } else {
                     preparedContext.close();
@@ -1243,6 +1261,10 @@ public class QueryService extends BasicService {
         Connection conn = QueryConnection.getConnection(project);
         PreparedStatement preparedStatement = conn.prepareStatement(sql);
         Collection<OLAPContext> olapContexts = OLAPContext.getThreadLocalContexts();
+        // If the preparedContext is first initialized, then set the borrowed tag to false
+        for (OLAPContext olapContext : olapContexts) {
+            olapContext.isBorrowedContext = false;
+        }
         return new PreparedContext(conn, preparedStatement, olapContexts);
     }
 

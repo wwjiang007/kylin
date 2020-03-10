@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 
-source $(cd -P -- "$(dirname -- "$0")" && pwd -P)/header.sh
+source ${KYLIN_HOME:-"$(cd -P -- "$(dirname -- "$0")" && pwd -P)/../"}/bin/header.sh
 
 kafka_home=
 
@@ -48,3 +48,4 @@ else
         export kafka_dependency
     fi
 fi
+echo "export kafka_dependency=$kafka_dependency" > ${dir}/cached-kafka-dependency.sh

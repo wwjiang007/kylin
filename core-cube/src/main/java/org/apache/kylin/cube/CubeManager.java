@@ -27,6 +27,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,6 +46,8 @@ import org.apache.kylin.common.util.Pair;
 import org.apache.kylin.common.util.RandomUtil;
 import org.apache.kylin.cube.cuboid.Cuboid;
 import org.apache.kylin.cube.model.CubeDesc;
+import org.apache.kylin.cube.model.CubeDescTiretreeGlobalDomainDictUtil;
+import org.apache.kylin.cube.model.DimensionDesc;
 import org.apache.kylin.cube.model.SnapshotTableDesc;
 import org.apache.kylin.dict.DictionaryInfo;
 import org.apache.kylin.dict.DictionaryManager;
@@ -218,6 +221,10 @@ public class CubeManager implements IRealizationProvider {
             }
             return null;
         }
+    }
+
+    public List<String> getErrorCubes() {
+        return crud.getLoadFailedEntities();
     }
 
     /**
@@ -832,6 +839,7 @@ public class CubeManager implements IRealizationProvider {
             }
 
             CubeSegment newSegment = newSegment(cubeCopy, tsRange, segRange);
+            newSegment.setMerged(true);
 
             Segments<CubeSegment> mergingSegments = cubeCopy.getMergingSegments(newSegment);
             if (mergingSegments.size() <= 1)
@@ -864,7 +872,6 @@ public class CubeManager implements IRealizationProvider {
         }
 
         private void checkReadyForMerge(Segments<CubeSegment> mergingSegments) {
-
             // check if the segments to be merged are continuous
             for (int i = 0; i < mergingSegments.size() - 1; i++) {
                 if (!mergingSegments.get(i).getSegRange().connects(mergingSegments.get(i + 1).getSegRange()))
@@ -877,6 +884,15 @@ public class CubeManager implements IRealizationProvider {
             for (CubeSegment seg : mergingSegments) {
                 if (seg.getSizeKB() == 0 && seg.getInputRecords() == 0) {
                     emptySegment.add(seg.getName());
+                }
+            }
+            long maxSegMergeSpan = KylinConfig.getInstanceFromEnv().getMaxSegmentMergeSpan();
+
+            for (CubeSegment seg : mergingSegments) {
+                if (maxSegMergeSpan > 0 && seg.getTSRange().duration() > maxSegMergeSpan) {
+                    throw new IllegalArgumentException(
+                        "Segment range is larger than the max segement merge span, couldn't merge unless 'forceMergeEmptySegment' set to true: "
+                            + seg);
                 }
             }
 
@@ -953,7 +969,7 @@ public class CubeManager implements IRealizationProvider {
                 throw new IllegalStateException(String.format(Locale.ROOT,
                         "For cube %s, segment %s missing LastBuildJobID", cubeCopy.toString(), newSegCopy.toString()));
 
-            if (isReady(newSegCopy) == true) {
+            if (isReady(newSegCopy)) {
                 logger.warn("For cube {}, segment {} state should be NEW but is READY", cubeCopy, newSegCopy);
             }
 
@@ -1171,9 +1187,20 @@ public class CubeManager implements IRealizationProvider {
         @SuppressWarnings("unchecked")
         public Dictionary<String> getDictionary(CubeSegment cubeSeg, TblColRef col) {
             DictionaryInfo info = null;
+            String dictResPath = null;
             try {
                 DictionaryManager dictMgr = getDictionaryManager();
-                String dictResPath = cubeSeg.getDictResPath(col);
+
+                //tiretree global domain dic
+                List<CubeDescTiretreeGlobalDomainDictUtil.GlobalDict> globalDicts = cubeSeg.getCubeDesc().listDomainDict();
+                if (!globalDicts.isEmpty()) {
+                    dictResPath = CubeDescTiretreeGlobalDomainDictUtil.globalReuseDictPath(cubeSeg.getConfig(), col, cubeSeg.getCubeDesc());
+                }
+
+                if (Objects.isNull(dictResPath)){
+                    dictResPath = cubeSeg.getDictResPath(col);
+                }
+
                 if (dictResPath == null)
                     return null;
 
@@ -1223,28 +1250,61 @@ public class CubeManager implements IRealizationProvider {
         }
     }
 
-    public CubeInstance findLatestSnapshot(List<RealizationEntry> realizationEntries, String lookupTableName) {
+    /**
+     * To keep "select * from LOOKUP_TABLE" has consistent and latest result, we manually choose
+     * CubeInstance here to answer such query.
+     */
+    public CubeInstance findLatestSnapshot(List<RealizationEntry> realizationEntries, String lookupTableName,
+            CubeInstance cubeInstance) {
         CubeInstance cube = null;
-        if (realizationEntries.size() > 0) {
-            long maxBuildTime = Long.MIN_VALUE;
-            RealizationRegistry registry = RealizationRegistry.getInstance(config);
-            for (RealizationEntry entry : realizationEntries) {
-                IRealization realization = registry.getRealization(entry.getType(), entry.getRealization());
-                if (realization != null && realization.isReady() && realization instanceof CubeInstance) {
-                    if (realization.getModel().isLookupTable(lookupTableName)) {
+        try {
+            if (!realizationEntries.isEmpty()) {
+                long maxBuildTime = Long.MIN_VALUE;
+                RealizationRegistry registry = RealizationRegistry.getInstance(config);
+                for (RealizationEntry entry : realizationEntries) {
+                    IRealization realization = registry.getRealization(entry.getType(), entry.getRealization());
+                    if (realization != null && realization.isReady() && realization instanceof CubeInstance) {
                         CubeInstance current = (CubeInstance) realization;
-                        CubeSegment segment = current.getLatestReadySegment();
-                        if (segment != null) {
-                            long latestBuildTime = segment.getLastBuildTime();
-                            if (latestBuildTime > maxBuildTime) {
-                                maxBuildTime = latestBuildTime;
-                                cube = current;
+                        if (checkMeetSnapshotTable(current, lookupTableName)) {
+                            CubeSegment segment = current.getLatestReadySegment();
+                            if (segment != null) {
+                                long latestBuildTime = segment.getLastBuildTime();
+                                if (latestBuildTime > maxBuildTime) {
+                                    maxBuildTime = latestBuildTime;
+                                    cube = current;
+                                }
                             }
                         }
                     }
                 }
             }
+        } catch (Exception e) {
+            logger.info("Unexpected error.", e);
         }
-        return cube;
+        if (!cubeInstance.equals(cube)) {
+            logger.debug("Picked cube {} over {} as it provides a more recent snapshot of the lookup table {}", cube,
+                    cubeInstance, lookupTableName);
+        }
+        return cube == null ? cubeInstance : cube;
+    }
+
+    /**
+     * check if {toCheck} has snapshot of {lookupTableName}
+     * @param lookupTableName look like {SCHMEA}.{TABLE}
+     */
+    private boolean checkMeetSnapshotTable(CubeInstance toCheck, String lookupTableName) {
+        boolean checkRes = false;
+        String lookupTbl = lookupTableName;
+        String[] strArr = lookupTableName.split("\\.");
+        if (strArr.length > 1) {
+            lookupTbl = strArr[strArr.length - 1];
+        }
+        for (DimensionDesc dimensionDesc : toCheck.getDescriptor().getDimensions()) {
+            if (dimensionDesc.getTableRef().getTableName().equalsIgnoreCase(lookupTbl)) {
+                checkRes = true;
+                break;
+            }
+        }
+        return checkRes;
     }
 }

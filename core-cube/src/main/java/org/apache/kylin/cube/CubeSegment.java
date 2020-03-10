@@ -82,6 +82,10 @@ public class CubeSegment implements IBuildable, ISegment, Serializable {
     private SegmentStatusEnum status;
     @JsonProperty("size_kb")
     private long sizeKB;
+    @JsonProperty("is_merged")
+    private boolean isMerged;
+    @JsonProperty("estimate_ratio")
+    private List<Double> estimateRatio;
     @JsonProperty("input_records")
     private long inputRecords;
     @JsonProperty("input_records_size")
@@ -224,6 +228,22 @@ public class CubeSegment implements IBuildable, ISegment, Serializable {
         this.sizeKB = sizeKB;
     }
 
+    public boolean isMerged() {
+        return isMerged;
+    }
+
+    public void setMerged(boolean isMerged) {
+        this.isMerged = isMerged;
+    }
+
+    public List<Double> getEstimateRatio() {
+        return estimateRatio;
+    }
+
+    public void setEstimateRatio(List<Double> estimateRatio) {
+        this.estimateRatio = estimateRatio;
+    }
+
     public long getInputRecords() {
         return inputRecords;
     }
@@ -344,6 +364,14 @@ public class CubeSegment implements IBuildable, ISegment, Serializable {
         Map<TblColRef, Dictionary<String>> result = Maps.newHashMap();
         for (TblColRef col : getCubeDesc().getAllColumnsHaveDictionary()) {
             result.put(col, (Dictionary<String>) getDictionary(col));
+        }
+        return result;
+    }
+
+    public Map<TblColRef, Dictionary<String>> buildGlobalDictionaryMap(int globalColumnsSize) {
+        Map<TblColRef, Dictionary<String>> result = Maps.newHashMapWithExpectedSize(globalColumnsSize);
+        for (TblColRef col : getCubeDesc().getAllGlobalDictColumns()) {
+            result.put(col, getDictionary(col));
         }
         return result;
     }

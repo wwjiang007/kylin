@@ -35,7 +35,7 @@ import org.apache.kylin.stream.core.storage.columnar.compress.NoCompressedColumn
 import org.apache.kylin.stream.core.storage.columnar.compress.NoCompressedColumnWriter;
 import org.apache.kylin.stream.core.storage.columnar.compress.RunLengthCompressedColumnReader;
 import org.apache.kylin.stream.core.storage.columnar.compress.RunLengthCompressedColumnWriter;
-import org.apache.kylin.stream.core.util.TimeDerivedColumnType;
+import org.apache.kylin.dimension.TimeDerivedColumnType;
 
 public class ColumnarStoreDimDesc {
     private int fixLen;
@@ -78,7 +78,7 @@ public class ColumnarStoreDimDesc {
         } else if (compression == Compression.RUN_LENGTH) {
             return new RunLengthCompressedColumnReader(dataBuffer, columnDataStartOffset, columnDataLength, rowCount);
         }
-        return new NoCompressedColumnReader(dataBuffer, columnDataStartOffset, columnDataLength, rowCount);
+        return new NoCompressedColumnReader(dataBuffer, columnDataStartOffset, columnDataLength / rowCount, rowCount);
     }
 
     public ColumnDataReader getDimReaderFromFSInput(FSDataInputStream inputStream, int columnDataStartOffset,
@@ -88,6 +88,7 @@ public class ColumnarStoreDimDesc {
         } else if (compression == Compression.RUN_LENGTH) {
             return new FSInputRLECompressedColumnReader(inputStream, columnDataStartOffset, columnDataLength, rowCount);
         }
-        return new FSInputNoCompressedColumnReader(inputStream, columnDataStartOffset, columnDataLength, rowCount);
+        return new FSInputNoCompressedColumnReader(inputStream, columnDataStartOffset, columnDataLength / rowCount,
+                rowCount);
     }
 }

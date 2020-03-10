@@ -43,7 +43,7 @@ import org.slf4j.LoggerFactory;
 
 public class ColumnToRowJob extends AbstractHadoopJob {
     private static final Logger logger = LoggerFactory.getLogger(ColumnToRowJob.class);
-    private static final long DEFAULT_SIZE_PER_REDUCER = 16 * 1024 * 1024;
+    private static final long DEFAULT_SIZE_PER_REDUCER = 16 * 1024 * 1024L;
     private static final int MAX_REDUCERS = 1000;
 
     @Override
@@ -122,9 +122,6 @@ public class ColumnToRowJob extends AbstractHadoopJob {
     }
 
     public static void main(String[] args) throws Exception {
-        String[] params = { "-input", "/stream_index/test_streaming_table_cube", "-cubename",
-                "test_streaming_table_cube", "-segmentname", "20130331080000_20131212080000", "-output",
-                "target/test-output/7d_cuboid", "-jobname", "streaming_create_baseCuboid" };
         ColumnToRowJob job = new ColumnToRowJob();
         int exitCode = ToolRunner.run(job, args);
         System.exit(exitCode);

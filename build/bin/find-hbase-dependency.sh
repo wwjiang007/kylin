@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 
-source $(cd -P -- "$(dirname -- "$0")" && pwd -P)/header.sh
+source ${KYLIN_HOME:-"$(cd -P -- "$(dirname -- "$0")" && pwd -P)/../"}/bin/header.sh
 
 echo Retrieving hbase dependency...
 
@@ -48,3 +48,5 @@ fi
 hbase_dependency=${hbase_common_path}
 verbose "hbase dependency: $hbase_dependency"
 export hbase_dependency
+echo "export HBASE_ENV_INIT=$HBASE_ENV_INIT
+export hbase_dependency=$hbase_dependency" > ${dir}/cached-hbase-dependency.sh

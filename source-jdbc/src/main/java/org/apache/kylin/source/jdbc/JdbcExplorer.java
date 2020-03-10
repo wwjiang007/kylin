@@ -30,6 +30,7 @@ import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kylin.common.KylinConfig;
+import org.apache.kylin.common.SourceDialect;
 import org.apache.kylin.common.util.DBUtils;
 import org.apache.kylin.common.util.Pair;
 import org.apache.kylin.common.util.RandomUtil;
@@ -49,21 +50,24 @@ import org.slf4j.LoggerFactory;
 public class JdbcExplorer implements ISourceMetadataExplorer, ISampleDataDeployer {
     private static final Logger logger = LoggerFactory.getLogger(JdbcExplorer.class);
 
-    private final KylinConfig config;
-    private final String dialect;
+    private final SourceDialect dialect;
     private final DBConnConf dbconf;
     private final IJdbcMetadata jdbcMetadataDialect;
 
+    @Deprecated
     public JdbcExplorer() {
-        config = KylinConfig.getInstanceFromEnv();
-        String connectionUrl = config.getJdbcSourceConnectionUrl();
-        String driverClass = config.getJdbcSourceDriver();
-        String jdbcUser = config.getJdbcSourceUser();
-        String jdbcPass = config.getJdbcSourcePass();
-        this.dbconf = new DBConnConf(driverClass, connectionUrl, jdbcUser, jdbcPass);
-        this.dialect = config.getJdbcSourceDialect();
-        this.jdbcMetadataDialect = JdbcMetadataFactory.getJdbcMetadata(dialect, dbconf);
+        this(KylinConfig.getInstanceFromEnv());
     }
+
+    public JdbcExplorer(KylinConfig config) {
+         String connectionUrl = config.getJdbcSourceConnectionUrl();
+         String driverClass = config.getJdbcSourceDriver();
+         String jdbcUser = config.getJdbcSourceUser();
+         String jdbcPass = config.getJdbcSourcePass();
+         this.dbconf = new DBConnConf(driverClass, connectionUrl, jdbcUser, jdbcPass);
+         this.dialect = SourceDialect.getDialect(config.getJdbcSourceDialect());
+         this.jdbcMetadataDialect = JdbcMetadataFactory.getJdbcMetadata(dialect, dbconf);
+     }
 
     @Override
     public List<String> listDatabases() throws SQLException {
@@ -117,7 +121,7 @@ public class JdbcExplorer implements ISourceMetadataExplorer, ISampleDataDeploye
     }
 
     private String getSqlDataType(String javaDataType) {
-        if (JdbcDialect.DIALECT_VERTICA.equals(dialect) || JdbcDialect.DIALECT_MSSQL.equals(dialect)) {
+        if (SourceDialect.VERTICA.equals(dialect) || SourceDialect.MYSQL.equals(dialect)) {
             if (javaDataType.toLowerCase(Locale.ROOT).equals("double")) {
                 return "float";
             }
@@ -132,9 +136,9 @@ public class JdbcExplorer implements ISourceMetadataExplorer, ISampleDataDeploye
     }
 
     private String generateCreateSchemaSql(String schemaName) {
-        if (JdbcDialect.DIALECT_VERTICA.equals(dialect) || JdbcDialect.DIALECT_MYSQL.equals(dialect)) {
+        if (SourceDialect.VERTICA.equals(dialect) || SourceDialect.MYSQL.equals(dialect)) {
             return String.format(Locale.ROOT, "CREATE schema IF NOT EXISTS %s", schemaName);
-        } else if (JdbcDialect.DIALECT_MSSQL.equals(dialect)) {
+        } else if (SourceDialect.MSSQL.equals(dialect)) {
             return String.format(Locale.ROOT,
                     "IF NOT EXISTS (SELECT name FROM sys.schemas WHERE name = N'%s') EXEC('CREATE SCHEMA"
                             + " [%s] AUTHORIZATION [dbo]')",
@@ -151,13 +155,13 @@ public class JdbcExplorer implements ISourceMetadataExplorer, ISampleDataDeploye
     }
 
     private String generateLoadDataSql(String tableName, String tableFileDir) {
-        if (JdbcDialect.DIALECT_VERTICA.equals(dialect)) {
+        if (SourceDialect.VERTICA.equals(dialect)) {
             return String.format(Locale.ROOT, "copy %s from local '%s/%s.csv' delimiter as ',';", tableName,
                     tableFileDir, tableName);
-        } else if (JdbcDialect.DIALECT_MYSQL.equals(dialect)) {
+        } else if (SourceDialect.MYSQL.equals(dialect)) {
             return String.format(Locale.ROOT, "LOAD DATA INFILE '%s/%s.csv' INTO %s FIELDS TERMINATED BY ',';",
                     tableFileDir, tableName, tableName);
-        } else if (JdbcDialect.DIALECT_MSSQL.equals(dialect)) {
+        } else if (SourceDialect.MSSQL.equals(dialect)) {
             return String.format(Locale.ROOT, "BULK INSERT %s FROM '%s/%s.csv' WITH(FIELDTERMINATOR = ',')", tableName,
                     tableFileDir, tableName);
         } else {
@@ -297,6 +301,7 @@ public class JdbcExplorer implements ISourceMetadataExplorer, ISampleDataDeploye
 
             String kylinType = SqlUtil.jdbcTypeToKylinDataType(type);
             int precision = (SqlUtil.isPrecisionApplicable(kylinType) && csize > 0) ? csize : -1;
+            precision = Math.min(precision, KylinConfig.getInstanceFromEnv().getDefaultVarcharPrecision());
             int scale = (SqlUtil.isScaleApplicable(kylinType) && digits > 0) ? digits : -1;
 
             cdesc.setDatatype(new DataType(kylinType, precision, scale).toString());
