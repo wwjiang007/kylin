@@ -24,7 +24,8 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 
-import com.google.common.base.Strings;
+import org.apache.kylin.job.impl.threadpool.IJobRunner;
+import org.apache.kylin.shaded.com.google.common.base.Strings;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -57,13 +58,13 @@ import org.apache.kylin.metadata.model.TblColRef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.collect.Maps;
+import org.apache.kylin.shaded.com.google.common.collect.Maps;
 
 public class SaveDictStep extends AbstractExecutable {
     private static final Logger logger = LoggerFactory.getLogger(SaveDictStep.class);
 
     @Override
-    protected ExecuteResult doWork(ExecutableContext context) throws ExecuteException {
+    protected ExecuteResult doWork(ExecutableContext context, IJobRunner jobRunner) throws ExecuteException {
         logger.info("job {} start to run SaveDictStep", getJobFlowJobId());
         final CubeManager mgr = CubeManager.getInstance(context.getConfig());
         final DictionaryManager dictManager = DictionaryManager.getInstance(context.getConfig());

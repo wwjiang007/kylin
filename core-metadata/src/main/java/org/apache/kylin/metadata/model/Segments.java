@@ -33,7 +33,7 @@ import org.apache.kylin.metadata.model.SegmentRange.TSRange;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.collect.Lists;
+import org.apache.kylin.shaded.com.google.common.collect.Lists;
 
 public class Segments<T extends ISegment> extends ArrayList<T> implements Serializable {
 
@@ -467,8 +467,9 @@ public class Segments<T extends ISegment> extends ArrayList<T> implements Serial
     }
 
     public Pair<Boolean, Boolean> fitInSegments(ISegment newOne) {
-        if (this.isEmpty())
-            return null;
+        if (this.isEmpty()) {
+          return Pair.newPair(false, false);        
+        }
 
         ISegment first = this.get(0);
         ISegment last = this.get(this.size() - 1);

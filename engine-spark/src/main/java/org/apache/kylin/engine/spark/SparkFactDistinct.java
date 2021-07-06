@@ -92,13 +92,13 @@ import org.apache.spark.util.LongAccumulator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
-import com.google.common.hash.HashFunction;
-import com.google.common.hash.Hasher;
-import com.google.common.hash.Hashing;
+import org.apache.kylin.shaded.com.google.common.base.Preconditions;
+import org.apache.kylin.shaded.com.google.common.collect.Lists;
+import org.apache.kylin.shaded.com.google.common.collect.Maps;
+import org.apache.kylin.shaded.com.google.common.collect.Sets;
+import org.apache.kylin.shaded.com.google.common.hash.HashFunction;
+import org.apache.kylin.shaded.com.google.common.hash.Hasher;
+import org.apache.kylin.shaded.com.google.common.hash.Hashing;
 
 import scala.Tuple2;
 import scala.Tuple3;
@@ -110,11 +110,11 @@ public class SparkFactDistinct extends AbstractApplication implements Serializab
     public static final Option OPTION_CUBE_NAME = OptionBuilder.withArgName(BatchConstants.ARG_CUBE_NAME).hasArg()
             .isRequired(true).withDescription("Cube Name").create(BatchConstants.ARG_CUBE_NAME);
     public static final Option OPTION_META_URL = OptionBuilder.withArgName("metaUrl").hasArg().isRequired(true)
-            .withDescription("HDFS metadata url").create("metaUrl");
+            .withDescription("HDFS metadata url").create(BatchConstants.ARG_META_URL);
     public static final Option OPTION_OUTPUT_PATH = OptionBuilder.withArgName(BatchConstants.ARG_OUTPUT).hasArg()
             .isRequired(true).withDescription("Cube output path").create(BatchConstants.ARG_OUTPUT);
     public static final Option OPTION_SEGMENT_ID = OptionBuilder.withArgName("segmentId").hasArg().isRequired(true)
-            .withDescription("Cube Segment Id").create("segmentId");
+            .withDescription("Cube Segment Id").create(BatchConstants.ARG_SEGMENT_ID);
     public static final Option OPTION_STATS_SAMPLING_PERCENT = OptionBuilder
             .withArgName(BatchConstants.ARG_STATS_SAMPLING_PERCENT).hasArg().isRequired(true)
             .withDescription("Statistics sampling percent").create(BatchConstants.ARG_STATS_SAMPLING_PERCENT);
@@ -548,7 +548,7 @@ public class SparkFactDistinct extends AbstractApplication implements Serializab
                 Hasher hc = hf.newHasher();
                 String colValue = row[rowkeyColIndex[i]];
                 if (colValue != null) {
-                    rowHashCodes[i] = hc.putString(colValue).hash().asBytes();
+                    rowHashCodes[i] = hc.putUnencodedChars(colValue).hash().asBytes();
                 } else {
                     rowHashCodes[i] = hc.putInt(0).hash().asBytes();
                 }
@@ -572,7 +572,7 @@ public class SparkFactDistinct extends AbstractApplication implements Serializab
                 String colValue = row[rowkeyColIndex[i]];
                 if (colValue == null)
                     colValue = "0";
-                byte[] bytes = hc.putString(colValue).hash().asBytes();
+                byte[] bytes = hc.putUnencodedChars(colValue).hash().asBytes();
                 rowHashCodesLong[i] = (Bytes.toLong(bytes) + i);//add column ordinal to the hash value to distinguish between (a,b) and (b,a)
             }
 

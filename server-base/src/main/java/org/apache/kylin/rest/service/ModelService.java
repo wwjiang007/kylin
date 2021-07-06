@@ -31,6 +31,7 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.kylin.common.persistence.RootPersistentEntity;
 import org.apache.kylin.cube.CubeInstance;
 import org.apache.kylin.cube.model.CubeDesc;
+import org.apache.kylin.job.JoinedFormatter;
 import org.apache.kylin.metadata.ModifiedOrder;
 import org.apache.kylin.metadata.draft.Draft;
 import org.apache.kylin.metadata.model.DataModelDesc;
@@ -39,12 +40,16 @@ import org.apache.kylin.metadata.model.JoinsTree;
 import org.apache.kylin.metadata.model.ModelDimensionDesc;
 import org.apache.kylin.metadata.model.TableDesc;
 import org.apache.kylin.metadata.model.TblColRef;
+import org.apache.kylin.metadata.project.ProjectInstance;
+import org.apache.kylin.metadata.util.ModelUtil;
 import org.apache.kylin.rest.exception.BadRequestException;
 import org.apache.kylin.rest.exception.ForbiddenException;
 import org.apache.kylin.rest.msg.Message;
 import org.apache.kylin.rest.msg.MsgPicker;
 import org.apache.kylin.rest.util.AclEvaluate;
 import org.apache.kylin.rest.util.ValidateUtil;
+import org.apache.kylin.shaded.com.google.common.collect.Maps;
+import org.apache.kylin.shaded.com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,9 +57,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
-
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 
 /**
  * @author jiazhong
@@ -147,13 +149,52 @@ public class ModelService extends BasicService {
     public DataModelDesc updateModelAndDesc(String project, DataModelDesc desc) throws IOException {
         aclEvaluate.checkProjectWritePermission(project);
         validateModel(project, desc);
+        checkModelCompatibility(project, desc);
         getDataModelManager().updateDataModelDesc(desc);
         return desc;
+    }
+
+    public void checkModelCompatibility(String project, DataModelDesc dataModalDesc) {
+        ProjectInstance prjInstance = getProjectManager().getProject(project);
+        if (prjInstance == null) {
+            throw new BadRequestException("Project " + project + " does not exist");
+        }
+        if (!prjInstance.getConfig().isModelSchemaUpdaterCheckerEnabled()) {
+            logger.info("Skip the check for model schema update");
+            return;
+        }
+        ModelSchemaUpdateChecker checker = new ModelSchemaUpdateChecker(getTableManager(), getCubeManager(),
+                getDataModelManager());
+        ModelSchemaUpdateChecker.CheckResult result = checker.allowEdit(dataModalDesc, project);
+        result.raiseExceptionWhenInvalid();
+    }
+
+    public void checkModelCompatibility(DataModelDesc dataModalDesc, List<TableDesc> tableDescList) {
+        ModelSchemaUpdateChecker checker = new ModelSchemaUpdateChecker(getTableManager(), getCubeManager(),
+                getDataModelManager());
+
+        Map<String, TableDesc> tableDescMap = Maps.newHashMapWithExpectedSize(tableDescList.size());
+        for (TableDesc tableDesc : tableDescList) {
+            tableDescMap.put(tableDesc.getIdentity(), tableDesc);
+        }
+        dataModalDesc.init(getConfig(), tableDescMap);
+        ModelSchemaUpdateChecker.CheckResult result = checker.allowEdit(dataModalDesc, null, false);
+        result.raiseExceptionWhenInvalid();
     }
 
     public void validateModel(String project, DataModelDesc desc) throws IllegalArgumentException {
         String factTableName = desc.getRootFactTableName();
         TableDesc tableDesc = getTableManager().getTableDesc(factTableName, project);
+
+        if (!StringUtils.isEmpty(desc.getFilterCondition())) {
+            try {
+                JoinedFormatter formatter = new JoinedFormatter(true);
+                ModelUtil.verifyFilterCondition(project, getTableManager(), desc,
+                        formatter.formatSentence(desc.getFilterCondition()));
+            } catch (Exception e) {
+                throw new BadRequestException(e.toString());
+            }
+        }
         if ((tableDesc.getSourceType() == ISourceAware.ID_STREAMING || tableDesc.isStreamingTable())
                 && (desc.getPartitionDesc() == null || desc.getPartitionDesc().getPartitionDateColumn() == null)) {
             throw new IllegalArgumentException("Must define a partition column.");

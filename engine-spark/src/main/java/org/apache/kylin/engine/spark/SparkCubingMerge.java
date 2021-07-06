@@ -17,7 +17,7 @@
 */
 package org.apache.kylin.engine.spark;
 
-import com.google.common.collect.Lists;
+import org.apache.kylin.shaded.com.google.common.collect.Lists;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
@@ -68,9 +68,9 @@ public class SparkCubingMerge extends AbstractApplication implements Serializabl
     public static final Option OPTION_CUBE_NAME = OptionBuilder.withArgName(BatchConstants.ARG_CUBE_NAME).hasArg()
             .isRequired(true).withDescription("Cube Name").create(BatchConstants.ARG_CUBE_NAME);
     public static final Option OPTION_SEGMENT_ID = OptionBuilder.withArgName("segment").hasArg().isRequired(true)
-            .withDescription("Cube Segment Id").create("segmentId");
+            .withDescription("Cube Segment Id").create(BatchConstants.ARG_SEGMENT_ID);
     public static final Option OPTION_META_URL = OptionBuilder.withArgName("metaUrl").hasArg().isRequired(true)
-            .withDescription("HDFS metadata url").create("metaUrl");
+            .withDescription("HDFS metadata url").create(BatchConstants.ARG_META_URL);
     public static final Option OPTION_OUTPUT_PATH = OptionBuilder.withArgName(BatchConstants.ARG_OUTPUT).hasArg()
             .isRequired(true).withDescription("HFile output path").create(BatchConstants.ARG_OUTPUT);
     public static final Option OPTION_INPUT_PATH = OptionBuilder.withArgName(BatchConstants.ARG_INPUT).hasArg()
@@ -112,7 +112,7 @@ public class SparkCubingMerge extends AbstractApplication implements Serializabl
         conf.set("spark.kryo.registrationRequired", "true").registerKryoClasses(kryoClassArray);
 
         try (JavaSparkContext sc = new JavaSparkContext(conf)) {
-            SparkUtil.modifySparkHadoopConfiguration(sc.sc()); // set dfs.replication=2 and enable compress
+            SparkUtil.modifySparkHadoopConfiguration(sc.sc(), AbstractHadoopJob.loadKylinConfigFromHdfs(new SerializableConfiguration(sc.hadoopConfiguration()), metaUrl)); // set dfs.replication and enable compress
             KylinSparkJobListener jobListener = new KylinSparkJobListener();
             sc.sc().addSparkListener(jobListener);
 

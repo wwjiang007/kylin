@@ -19,6 +19,7 @@
 package org.apache.kylin.cube.cuboid;
 
 import java.io.PrintWriter;
+import java.io.Serializable;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -33,9 +34,9 @@ import org.apache.kylin.cube.model.CubeDesc;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
+import org.apache.kylin.shaded.com.google.common.annotations.VisibleForTesting;
+import org.apache.kylin.shaded.com.google.common.base.Preconditions;
+import org.apache.kylin.shaded.com.google.common.collect.Lists;
 
 public class TreeCuboidScheduler extends CuboidScheduler {
 
@@ -71,7 +72,7 @@ public class TreeCuboidScheduler extends CuboidScheduler {
         return cuboidTree.isValid(requestCuboid);
     }
 
-    public static class CuboidTree {
+    public static class CuboidTree implements Serializable {
         private int treeLevels;
 
         private TreeNode root;
@@ -232,7 +233,7 @@ public class TreeCuboidScheduler extends CuboidScheduler {
         }
     }
 
-    public static class TreeNode {
+    public static class TreeNode implements Serializable {
         @JsonProperty("cuboid_id")
         long cuboidId;
         @JsonIgnore
@@ -290,7 +291,7 @@ public class TreeCuboidScheduler extends CuboidScheduler {
     /**
      * Compare cuboid according to the cuboid data row count
      */
-    public static class CuboidCostComparator implements Comparator<Long> {
+    public static class CuboidCostComparator implements Comparator<Long>, Serializable {
         private Map<Long, Long> cuboidStatistics;
 
         public CuboidCostComparator(Map<Long, Long> cuboidStatistics) {

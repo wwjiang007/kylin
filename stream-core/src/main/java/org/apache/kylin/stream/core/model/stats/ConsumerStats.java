@@ -22,7 +22,7 @@ import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.google.common.collect.Maps;
+import org.apache.kylin.shaded.com.google.common.collect.Maps;
 
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.NONE, getterVisibility = JsonAutoDetect.Visibility.NONE, isGetterVisibility = JsonAutoDetect.Visibility.NONE, setterVisibility = JsonAutoDetect.Visibility.NONE)
 public class ConsumerStats {
@@ -46,6 +46,9 @@ public class ConsumerStats {
 
     @JsonProperty("consume_lag")
     private long consumeLag;
+
+    @JsonProperty("consumer_thread_alive")
+    private boolean consumerThreadAlive;
 
     public Map<Integer, PartitionConsumeStats> getPartitionConsumeStatsMap() {
         return partitionConsumeStatsMap;
@@ -101,5 +104,13 @@ public class ConsumerStats {
 
     public void setConsumeLag(long consumeLag) {
         this.consumeLag = consumeLag;
+    }
+
+    public boolean isConsumerThreadAlive() {
+        return consumerThreadAlive;
+    }
+
+    public void setConsumerThreadAlive(boolean consumerThreadAlive) {
+        this.consumerThreadAlive = consumerThreadAlive;
     }
 }

@@ -60,8 +60,8 @@ import org.apache.kylin.metadata.model.TblColRef;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
+import org.apache.kylin.shaded.com.google.common.collect.Lists;
+import org.apache.kylin.shaded.com.google.common.collect.Maps;
 
 public class MergeDictionaryMapper extends KylinMapper<IntWritable, NullWritable, IntWritable, Text> {
     private static final Logger logger = LoggerFactory.getLogger(MergeDictionaryMapper.class);
@@ -168,8 +168,7 @@ public class MergeDictionaryMapper extends KylinMapper<IntWritable, NullWritable
                             long perSourceRecordCount = Bytes.toLong(valueW.getBytes());
                             if (perSourceRecordCount > 0) {
                                 sourceRecordCount += perSourceRecordCount;
-                                CubeSegment iSegment = cubeInstance.getSegmentById(segmentId);
-                                effectiveTimeRange += iSegment.getTSRange().duration();
+                                effectiveTimeRange += cubeSegment.getTSRange().duration();
                             }
                         }  else if (keyW.get() > 0) {
                             HLLCounter hll = new HLLCounter(kylinConfig.getCubeStatsHLLPrecision());

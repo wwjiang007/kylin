@@ -37,7 +37,7 @@ import org.apache.kylin.job.engine.JobEngineConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Preconditions;
+import org.apache.kylin.shaded.com.google.common.base.Preconditions;
 
 public class BatchOptimizeJobBuilder2 extends JobBuilderSupport {
     private static final Logger logger = LoggerFactory.getLogger(BatchOptimizeJobBuilder2.class);
@@ -64,6 +64,7 @@ public class BatchOptimizeJobBuilder2 extends JobBuilderSupport {
 
         // Phase 1: Prepare base cuboid data from old segment
         String oldcuboidRootPath = getCuboidRootPath(oldSegment) + "*";
+        // write to optimizeCuboidRootPath + /base_cuboid OR +/old
         result.addTask(createFilterRecommendCuboidDataStep(oldcuboidRootPath, optimizeCuboidRootPath));
 
         // Phase 2: Prepare dictionary and statistics for new segment

@@ -6,23 +6,26 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-*/
+ */
 
 package org.apache.kylin.rest.service;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -30,6 +33,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kylin.common.KylinConfig;
@@ -68,14 +73,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Component;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
+import org.apache.kylin.shaded.com.google.common.cache.Cache;
+import org.apache.kylin.shaded.com.google.common.cache.CacheBuilder;
+import org.apache.kylin.shaded.com.google.common.collect.Lists;
+import org.apache.kylin.shaded.com.google.common.collect.Maps;
+import org.apache.kylin.shaded.com.google.common.collect.Sets;
 
 /**
- * StreamingCoordinatorService will try to forward request to corrdinator leader by HttpClient.
+ * StreamingCoordinatorService will try to forward request to coordinator leader.
  */
 @Component("streamingServiceV2")
 public class StreamingV2Service extends BasicService {
@@ -97,12 +102,37 @@ public class StreamingV2Service extends BasicService {
         receiverAdminClient = new HttpReceiverAdminClient();
     }
 
-    public List<StreamingSourceConfig> listAllStreamingConfigs(final String table) throws IOException {
+    StreamingV2Service(StreamMetadataStore metadataStore, ReceiverAdminClient adminClient) {
+        streamMetadataStore = metadataStore;
+        receiverAdminClient = adminClient;
+    }
+
+    public void checkStreamingSourceCompatibility(final String prj, final StreamingSourceConfig streamingSourceConfig) throws Exception {
+        StreamingSourceConfig existing = getStreamingManagerV2().
+                getConfig(streamingSourceConfig.getName(), streamingSourceConfig.getProjectName());
+        if (existing == null) {
+            return;
+        } else if (!Objects.equals(streamingSourceConfig.getParserInfo(), existing.getParserInfo())) {
+            logger.info("stream source parse info compatibility check, source {}, target {}",
+                    streamingSourceConfig.getParserInfo(), existing.getParserInfo());
+            throw new Exception(String.format(Locale.ROOT,
+                    "the stream source parse info is not compatible, name %s, project %s",
+                    streamingSourceConfig.getName(), streamingSourceConfig.getProjectName()));
+        } else if (!Objects.equals(streamingSourceConfig.getProperties(), existing.getProperties())) {
+            logger.info("stream source properties compatibility check, source {}, target {}",
+                    streamingSourceConfig.getProperties(), existing.getProperties());
+            throw new Exception(String.format(Locale.ROOT,
+                    "the stream source properties are not compatible, name %s, project %s",
+                    streamingSourceConfig.getName(), streamingSourceConfig.getProjectName()));
+        }
+    }
+
+    public List<StreamingSourceConfig> listAllStreamingConfigs(final String table, final String projectName) throws IOException {
         List<StreamingSourceConfig> streamingSourceConfigs = Lists.newArrayList();
-        if (StringUtils.isEmpty(table)) {
+        if (StringUtils.isEmpty(table) || StringUtils.isEmpty(projectName)) {
             streamingSourceConfigs = getStreamingManagerV2().listAllStreaming();
         } else {
-            StreamingSourceConfig config = getStreamingManagerV2().getConfig(table);
+            StreamingSourceConfig config = getStreamingManagerV2().getConfig(table, projectName);
             if (config != null) {
                 streamingSourceConfigs.add(config);
             }
@@ -111,10 +141,10 @@ public class StreamingV2Service extends BasicService {
         return streamingSourceConfigs;
     }
 
-    public List<StreamingSourceConfig> getStreamingConfigs(final String table, final Integer limit, final Integer offset)
+    public List<StreamingSourceConfig> getStreamingConfigs(final String table, final String projectName, final Integer limit, final Integer offset)
             throws IOException {
         List<StreamingSourceConfig> streamingSourceConfigs;
-        streamingSourceConfigs = listAllStreamingConfigs(table);
+        streamingSourceConfigs = listAllStreamingConfigs(table, projectName);
 
         if (limit == null || offset == null) {
             return streamingSourceConfigs;
@@ -130,7 +160,7 @@ public class StreamingV2Service extends BasicService {
     @PreAuthorize(Constant.ACCESS_HAS_ROLE_ADMIN
             + " or hasPermission(#project, 'ADMINISTRATION')")
     public StreamingSourceConfig createStreamingConfig(StreamingSourceConfig config, ProjectInstance project) throws IOException {
-        if (getStreamingManagerV2().getConfig(config.getName()) != null) {
+        if (getStreamingManagerV2().getConfigMustWithProject(config.getName(), config.getProjectName()) != null) {
             throw new InternalErrorException("The streamingSourceConfig named " + config.getName() + " already exists");
         }
         StreamingSourceConfig streamingSourceConfig = getStreamingManagerV2().saveStreamingConfig(config);
@@ -225,13 +255,30 @@ public class StreamingV2Service extends BasicService {
         getCoordinatorClient().reAssignCube(cubeName, newAssignment);
     }
 
-    private void validateAssignment(CubeAssignment newAssignment) {
+    void validateAssignment(CubeAssignment newAssignment) {
         Map<Integer, List<Partition>> assignments = newAssignment.getAssignments();
+        Map<Integer, Set<Partition>> assignmentSet = assignments.keySet().stream().collect(
+                Collectors.toMap(Function.identity(), x -> new HashSet<>(assignments.get(x))));
+
         Set<Integer> inputReplicaSetIDs = assignments.keySet();
         Set<Integer> allReplicaSetIDs = Sets.newHashSet(streamMetadataStore.getReplicaSetIDs());
         for (Integer inputReplicaSetID : inputReplicaSetIDs) {
             if (!allReplicaSetIDs.contains(inputReplicaSetID)) {
-                throw new IllegalArgumentException("the replica set id:" + inputReplicaSetID + " does not exist");
+                throw new IllegalArgumentException("The replica set id:" + inputReplicaSetID + " does not exist");
+            }
+
+            Set<Partition> partitionSet = assignmentSet.get(inputReplicaSetID);
+            if (partitionSet.isEmpty()) {
+                throw new IllegalArgumentException("PartitionList is empty :" + inputReplicaSetID);
+            }
+            for (Map.Entry<Integer, Set<Partition>> entry : assignmentSet.entrySet()) {
+                if (!entry.getKey().equals(inputReplicaSetID)) {
+                    Set<Partition> anotherPartitionSet = entry.getValue();
+                    int intersection = Sets.intersection(anotherPartitionSet, partitionSet).size();
+                    if (intersection > 0) {
+                        throw new IllegalArgumentException("Intersection detected between : " + inputReplicaSetID + " with " + entry.getKey());
+                    }
+                }
             }
         }
     }
@@ -412,6 +459,10 @@ public class StreamingV2Service extends BasicService {
         for (Node receiver : receivers) {
             Future<ReceiverStats> futureStats = statsFuturesMap.get(receiver);
             try {
+                if (futureStats == null) {
+                    logger.warn("Receiver node {} can not be connect.", receiver);
+                    continue;
+                }
                 ReceiverStats receiverStats = futureStats.get();
                 receiverStatsMap.put(receiver, receiverStats);
             } catch (InterruptedException e) {

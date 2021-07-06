@@ -26,12 +26,13 @@ import java.util.Set;
 
 import org.apache.kylin.cube.cuboid.algorithm.CuboidStatsUtil;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
+import org.apache.kylin.shaded.com.google.common.base.Preconditions;
+import org.apache.kylin.shaded.com.google.common.collect.Lists;
+import org.apache.kylin.shaded.com.google.common.collect.Maps;
 
 public class CuboidUtil {
 
+    // get the i cuboid the j '1' `s index
     public static Integer[][] getCuboidBitSet(Long[] cuboidIds, int nRowKey) {
         Preconditions.checkArgument(nRowKey < Long.SIZE,
                 "the size of row key could not be large than " + (Long.SIZE - 1));
